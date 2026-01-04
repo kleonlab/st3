@@ -1,3 +1,10 @@
+## documenting implementation 
+
+- run the pyproject.toml file by running uv sync in the terminal. 
+now all the requirements are downloaded and setup. 
+
+- the demo_rnaseq is a complete running example. 
+
 ## Overview
 
 This library adapts discrete diffusion models for gene expression prediction:
@@ -125,8 +132,6 @@ See [`examples/demo_rnaseq.ipynb`](examples/demo_rnaseq.ipynb) for a complete wa
 - Gene expression imputation
 - De novo cell generation
 - Visualization
-
-## API Reference
 
 ### Data
 
