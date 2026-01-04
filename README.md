@@ -1,9 +1,3 @@
-# SEDD for RNA-seq
-
-A clean implementation of **Score-Entropy Discrete Diffusion (SEDD)** for masked gene expression prediction on single-cell RNA-seq data.
-
-Based on the paper: ["Discrete Diffusion Modeling by Estimating the Ratios of the Data Distribution"](https://github.com/louaaron/Score-Entropy-Discrete-Diffusion) (ICML 2024 Best Paper)
-
 ## Overview
 
 This library adapts discrete diffusion models for gene expression prediction:
