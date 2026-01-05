@@ -455,3 +455,6 @@ class SEDDTransformerLarge(SEDDTransformer):
         )
         defaults.update(kwargs)
         super().__init__(num_genes, num_bins, **defaults)
+
+
+# add a new model for perturb seq incorporation here. 

@@ -399,3 +399,6 @@ def create_trainer(
         scheduler=scheduler,
         device=device,
     )
+
+
+#add a new class for perturb seq trainer here.  
