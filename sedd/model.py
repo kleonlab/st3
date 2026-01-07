@@ -1,0 +1,460 @@
+"""
+Transformer model for Score-Entropy Discrete Diffusion.
+
+Adapted for gene expression prediction on single-cell RNA-seq data.
+"""
+
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from typing import Optional
+
+Tensor = torch.Tensor
+
+
+class SinusoidalEmbedding(nn.Module):
+    """Sinusoidal positional/time embedding."""
+
+    def __init__(self, dim: int, max_period: float = 10000.0):
+        super().__init__()
+        self.dim = dim
+        self.max_period = max_period
+
+    def forward(self, t: Tensor) -> Tensor:
+        """
+        Args:
+            t: Tensor of shape [batch_size] with values in [0, 1]
+
+        Returns:
+            Embeddings of shape [batch_size, dim]
+        """
+        half_dim = self.dim // 2
+        freqs = torch.exp(
+            -math.log(self.max_period)
+            * torch.arange(half_dim, device=t.device, dtype=t.dtype)
+            / half_dim
+        )
+        args = t.unsqueeze(-1) * freqs.unsqueeze(0)
+        embedding = torch.cat([torch.sin(args), torch.cos(args)], dim=-1)
+        if self.dim % 2 == 1:
+            embedding = F.pad(embedding, (0, 1))
+        return embedding
+
+
+class RotaryEmbedding(nn.Module):
+    """Rotary Position Embedding (RoPE)."""
+
+    def __init__(self, dim: int, max_seq_len: int = 8192, base: float = 10000.0):
+        super().__init__()
+        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+        self.register_buffer("inv_freq", inv_freq)
+        self.max_seq_len = max_seq_len
+
+    def forward(self, seq_len: int, device: torch.device) -> Tensor:
+        """Get rotary embeddings for sequence length."""
+        t = torch.arange(seq_len, device=device, dtype=self.inv_freq.dtype)
+        freqs = torch.einsum("i,j->ij", t, self.inv_freq)
+        emb = torch.cat([freqs, freqs], dim=-1)
+        return emb
+
+
+def rotate_half(x: Tensor) -> Tensor:
+    """Rotate half the hidden dims of the input."""
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2:]
+    return torch.cat([-x2, x1], dim=-1)
+
+
+def apply_rotary_emb(x: Tensor, freqs: Tensor) -> Tensor:
+    """Apply rotary embeddings to input tensor."""
+    cos = freqs.cos().unsqueeze(0).unsqueeze(0)  # [1, 1, seq, dim]
+    sin = freqs.sin().unsqueeze(0).unsqueeze(0)
+    return (x * cos) + (rotate_half(x) * sin)
+
+
+class MultiHeadAttention(nn.Module):
+    """Multi-head self-attention with optional rotary embeddings."""
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        dropout: float = 0.0,
+        use_rotary: bool = True,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.use_rotary = use_rotary
+
+        assert hidden_dim % num_heads == 0
+
+        self.qkv = nn.Linear(hidden_dim, 3 * hidden_dim, bias=False)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.dropout = nn.Dropout(dropout)
+
+        if use_rotary:
+            self.rotary = RotaryEmbedding(self.head_dim)
+
+    def forward(
+        self,
+        x: Tensor,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """
+        Args:
+            x: Input tensor [batch, seq_len, hidden_dim]
+            mask: Optional attention mask [batch, seq_len]
+
+        Returns:
+            Output tensor [batch, seq_len, hidden_dim]
+        """
+        batch_size, seq_len, _ = x.shape
+
+        # Compute Q, K, V
+        qkv = self.qkv(x)
+        qkv = qkv.view(batch_size, seq_len, 3, self.num_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, batch, heads, seq, head_dim]
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        # Apply rotary embeddings
+        if self.use_rotary:
+            freqs = self.rotary(seq_len, x.device)
+            q = apply_rotary_emb(q, freqs)
+            k = apply_rotary_emb(k, freqs)
+
+        # Scaled dot-product attention
+        scale = self.head_dim ** -0.5
+        attn = torch.matmul(q, k.transpose(-2, -1)) * scale
+
+        if mask is not None:
+            # mask: [batch, seq_len] -> [batch, 1, 1, seq_len]
+            mask = mask.unsqueeze(1).unsqueeze(2)
+            attn = attn.masked_fill(mask == 0, float("-inf"))
+
+        attn = F.softmax(attn, dim=-1)
+        attn = self.dropout(attn)
+
+        # Apply attention to values
+        out = torch.matmul(attn, v)
+        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.hidden_dim)
+        out = self.out_proj(out)
+
+        return out
+
+
+class FeedForward(nn.Module):
+    """Feed-forward network with GELU activation."""
+
+    def __init__(self, hidden_dim: int, ff_dim: int, dropout: float = 0.0):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(hidden_dim, ff_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(ff_dim, hidden_dim),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.net(x)
+
+
+class AdaptiveLayerNorm(nn.Module):
+    """Adaptive Layer Normalization conditioned on time embedding.
+
+    Applies: y = gamma(t) * LayerNorm(x) + beta(t)
+    """
+
+    def __init__(self, hidden_dim: int, cond_dim: int):
+        super().__init__()
+        self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        self.gamma_beta = nn.Linear(cond_dim, 2 * hidden_dim)
+
+    def forward(self, x: Tensor, cond: Tensor) -> Tensor:
+        """
+        Args:
+            x: Input [batch, seq_len, hidden_dim]
+            cond: Conditioning [batch, cond_dim]
+
+        Returns:
+            Normalized output [batch, seq_len, hidden_dim]
+        """
+        gamma_beta = self.gamma_beta(cond).unsqueeze(1)  # [batch, 1, 2*hidden_dim]
+        gamma, beta = gamma_beta.chunk(2, dim=-1)
+        return gamma * self.norm(x) + beta
+
+
+class TransformerBlock(nn.Module):
+    """Transformer block with adaptive layer normalization."""
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        ff_dim: int,
+        cond_dim: int,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.attn_norm = AdaptiveLayerNorm(hidden_dim, cond_dim)
+        self.attn = MultiHeadAttention(hidden_dim, num_heads, dropout)
+        self.ff_norm = AdaptiveLayerNorm(hidden_dim, cond_dim)
+        self.ff = FeedForward(hidden_dim, ff_dim, dropout)
+
+    def forward(self, x: Tensor, cond: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        """
+        Args:
+            x: Input [batch, seq_len, hidden_dim]
+            cond: Time conditioning [batch, cond_dim]
+            mask: Optional attention mask
+
+        Returns:
+            Output [batch, seq_len, hidden_dim]
+        """
+        # Self-attention with residual
+        x = x + self.attn(self.attn_norm(x, cond), mask)
+        # Feed-forward with residual
+        x = x + self.ff(self.ff_norm(x, cond))
+        return x
+
+
+class SEDDTransformer(nn.Module):
+    """SEDD Transformer for discrete diffusion on gene expression.
+
+    Architecture:
+    - Token embedding for discretized gene expression
+    - Time embedding via sinusoidal + MLP
+    - Transformer blocks with adaptive layer norm
+    - Output projection to score over vocabulary
+    """
+
+    def __init__(
+        self,
+        num_genes: int,
+        num_bins: int,
+        hidden_dim: int = 256,
+        num_layers: int = 6,
+        num_heads: int = 8,
+        ff_mult: float = 4.0,
+        dropout: float = 0.1,
+        max_seq_len: int = 4096,
+    ):
+        """
+        Args:
+            num_genes: Number of genes (sequence length)
+            num_bins: Number of expression bins (vocabulary size, excluding mask)
+            hidden_dim: Transformer hidden dimension
+            num_layers: Number of transformer layers
+            num_heads: Number of attention heads
+            ff_mult: Feed-forward dimension multiplier
+            dropout: Dropout probability
+            max_seq_len: Maximum sequence length
+        """
+        super().__init__()
+        self.num_genes = num_genes
+        self.num_bins = num_bins
+        self.vocab_size = num_bins + 1  # +1 for mask token
+        self.hidden_dim = hidden_dim
+        self.mask_index = num_bins
+
+        ff_dim = int(hidden_dim * ff_mult)
+
+        # Token embedding
+        self.token_embed = nn.Embedding(self.vocab_size, hidden_dim)
+
+        # Gene position embedding (learnable)
+        self.gene_embed = nn.Embedding(max_seq_len, hidden_dim)
+
+        # Time embedding
+        self.time_embed = nn.Sequential(
+            SinusoidalEmbedding(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim * 4),
+            nn.GELU(),
+            nn.Linear(hidden_dim * 4, hidden_dim),
+        )
+
+        # Transformer blocks
+        self.blocks = nn.ModuleList([
+            TransformerBlock(hidden_dim, num_heads, ff_dim, hidden_dim, dropout)
+            for _ in range(num_layers)
+        ])
+
+        # Output layer
+        self.out_norm = AdaptiveLayerNorm(hidden_dim, hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, self.vocab_size, bias=False)
+
+        # Initialize
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize weights with small values for stable training."""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.normal_(module.weight, std=0.02)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                nn.init.normal_(module.weight, std=0.02)
+
+    def forward(
+        self,
+        x: Tensor,
+        sigma: Tensor,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """
+        Forward pass computing score estimates.
+
+        Args:
+            x: Token indices [batch_size, seq_len]
+            sigma: Noise level [batch_size] or scalar
+            mask: Optional attention mask [batch_size, seq_len]
+
+        Returns:
+            Score logits [batch_size, seq_len, vocab_size]
+        """
+        batch_size, seq_len = x.shape
+        device = x.device
+
+        # Ensure sigma has correct shape
+        if sigma.dim() == 0:
+            sigma = sigma.expand(batch_size)
+
+        # Embeddings
+        tok_emb = self.token_embed(x)
+        pos_idx = torch.arange(seq_len, device=device)
+        pos_emb = self.gene_embed(pos_idx).unsqueeze(0)
+        h = tok_emb + pos_emb
+
+        # Time conditioning
+        t_emb = self.time_embed(sigma)
+
+        # Transformer blocks
+        for block in self.blocks:
+            h = block(h, t_emb, mask)
+
+        # Output projection
+        h = self.out_norm(h, t_emb)
+        logits = self.out_proj(h)
+
+        return logits
+
+    def score(
+        self,
+        x: Tensor,
+        sigma: Tensor,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """Compute the score: log p(x) gradient w.r.t. discrete states.
+
+        For absorbing diffusion, the score represents the ratio
+        p(clean | noised) / p(noised).
+
+        Args:
+            x: Noised token indices [batch_size, seq_len]
+            sigma: Noise level
+            mask: Optional attention mask
+
+        Returns:
+            Score tensor [batch_size, seq_len, vocab_size]
+        """
+        logits = self.forward(x, sigma, mask)
+
+        # For absorbing diffusion, we apply softmax and adjust
+        # The score should be 0 for staying in mask state
+        score = F.log_softmax(logits, dim=-1)
+
+        return score
+
+    def get_loss(
+        self,
+        x_clean: Tensor,
+        x_noised: Tensor,
+        sigma: Tensor,
+        graph,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """Compute the SEDD loss.
+
+        The loss is the score entropy: matching predicted score to true score.
+
+        Args:
+            x_clean: Original clean data [batch_size, seq_len]
+            x_noised: Noised data [batch_size, seq_len]
+            sigma: Noise level
+            graph: Graph object for computing true score
+            mask: Optional mask for which positions to include
+
+        Returns:
+            Scalar loss value
+        """
+        # Get predicted score
+        pred_score = self.score(x_noised, sigma, mask)
+
+        # For absorbing diffusion, the true score at masked positions
+        # should point to the original clean token
+        # Loss is cross-entropy at masked positions
+        is_masked = (x_noised == self.mask_index)
+
+        if not is_masked.any():
+            return torch.tensor(0.0, device=x_clean.device)
+
+        # Get predictions at masked positions
+        pred_at_mask = pred_score[is_masked]  # [num_masked, vocab_size]
+        target_at_mask = x_clean[is_masked]   # [num_masked]
+
+        # Cross-entropy loss
+        loss = F.cross_entropy(pred_at_mask, target_at_mask)
+
+        return loss
+
+
+class SEDDTransformerSmall(SEDDTransformer):
+    """Small SEDD Transformer for quick experiments."""
+
+    def __init__(self, num_genes: int, num_bins: int, **kwargs):
+        defaults = dict(
+            hidden_dim=128,
+            num_layers=4,
+            num_heads=4,
+            ff_mult=4.0,
+            dropout=0.1,
+        )
+        defaults.update(kwargs)
+        super().__init__(num_genes, num_bins, **defaults)
+
+
+class SEDDTransformerMedium(SEDDTransformer):
+    """Medium SEDD Transformer."""
+
+    def __init__(self, num_genes: int, num_bins: int, **kwargs):
+        defaults = dict(
+            hidden_dim=256,
+            num_layers=6,
+            num_heads=8,
+            ff_mult=4.0,
+            dropout=0.1,
+        )
+        defaults.update(kwargs)
+        super().__init__(num_genes, num_bins, **defaults)
+
+
+class SEDDTransformerLarge(SEDDTransformer):
+    """Large SEDD Transformer."""
+
+    def __init__(self, num_genes: int, num_bins: int, **kwargs):
+        defaults = dict(
+            hidden_dim=512,
+            num_layers=8,
+            num_heads=8,
+            ff_mult=4.0,
+            dropout=0.1,
+        )
+        defaults.update(kwargs)
+        super().__init__(num_genes, num_bins, **defaults)
+
+
+# add a new model for perturb seq incorporation here. 

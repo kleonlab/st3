@@ -1,0 +1,20 @@
+# Configuration file for ST3 RNA-seq diffusion training and inference
+# This file contains shared configuration between training and inference scripts
+
+[data]
+# Path to training/full dataset (h5ad format)
+train_data = "/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad"
+
+# Path to test dataset (optional, if separate from train)
+# If not specified, validation split will be used from train_data
+test_data = ""
+
+# Validation fraction when splitting train_data
+val_fraction = 0.1
+
+[paths]
+# Base directory for experiments
+experiments_dir = "experiments"
+
+# Base directory for model checkpoints
+models_dir = "models"
