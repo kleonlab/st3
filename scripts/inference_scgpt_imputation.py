@@ -4,6 +4,9 @@ Inference script for imputation using scGPT model.
 
 This script loads a pre-trained scGPT model and performs gene expression imputation
 by masking some genes and predicting their values.
+
+Note: The models/ directory is typically a symlink to GPU storage. Place your
+scGPT model files in models/scGPT/ on the GPU node where they are accessible.
 """
 
 import argparse

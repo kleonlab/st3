@@ -3,6 +3,9 @@
 # Inference script for imputation using scGPT model.
 # This script runs scGPT imputation on the same dataset used for SEDD inference.
 #
+# Note: The models/ directory is typically a symlink to GPU storage.
+# Ensure your scGPT model files are placed in models/scGPT/ on the GPU node.
+#
 
 echo "=========================================="
 echo "scGPT Imputation Inference"
