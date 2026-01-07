@@ -5,10 +5,10 @@
 #
 
 # Default parameters (can be overridden by command line arguments)
-DATA_PATH="${DATA_PATH:-/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad}"
+DATA_PATH="${DATA_PATH:-/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562.h5ad}"
 CHECKPOINT_DIR="${CHECKPOINT_DIR:-experiments/rnaseq_diffusion}"
 NUM_EPOCHS="${NUM_EPOCHS:-100}"
-BATCH_SIZE="${BATCH_SIZE:-32}"
+BATCH_SIZE="${BATCH_SIZE:- 8}"
 LEARNING_RATE="${LEARNING_RATE:-1e-4}"
 HIDDEN_DIM="${HIDDEN_DIM:-128}"
 NUM_LAYERS="${NUM_LAYERS:-4}"
