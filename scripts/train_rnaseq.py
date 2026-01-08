@@ -24,21 +24,42 @@ from sedd.noise import LogLinearNoise
 from sedd.trainer import SEDDTrainer
 from sedd.data import train_val_split
 
+# Import TOML library (tomllib in Python 3.11+, tomli for older versions)
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+
+def load_config(config_path="config.toml"):
+    """Load configuration from TOML file."""
+    config_file = Path(__file__).parent.parent / config_path
+    if not config_file.exists():
+        print(f"Warning: Config file not found at {config_file}, using defaults")
+        return {}
+
+    with open(config_file, "rb") as f:
+        return tomllib.load(f)
+
 
 def parse_args():
+    # Load config file
+    config = load_config()
+    data_config = config.get("data", {})
+
     parser = argparse.ArgumentParser(description="Train SEDD for RNA-seq")
 
     # Data arguments
     parser.add_argument(
         "--data_path",
         type=str,
-        required=True,
+        default=data_config.get("train_data", None),
         help="Path to h5ad file containing RNA-seq data"
     )
     parser.add_argument(
         "--val_fraction",
         type=float,
-        default=0.1,
+        default=data_config.get("val_fraction", 0.1),
         help="Fraction of data to use for validation"
     )
 
@@ -159,6 +180,12 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    # Validate required arguments
+    if not args.data_path:
+        raise ValueError(
+            "No data_path provided. Either set it in config.toml or pass --data_path argument"
+        )
 
     # Set random seed
     torch.manual_seed(args.seed)
