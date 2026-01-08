@@ -50,7 +50,6 @@ def load_scgpt_model(model_dir, device):
     - best_model.pt or best_model.ckpt: model weights
     - vocab.json: vocabulary
     - var_dims.pkl: variable dimensions (optional)
-    - pert_one-hot-map.pt: perturbation mapping (optional)
     """
     model_dir = Path(model_dir)
 
@@ -84,8 +83,6 @@ def load_scgpt_model(model_dir, device):
     # Try to import scGPT
     try:
         from scgpt.model import TransformerModel
-        from scgpt.tokenizer import tokenize_and_pad_batch
-        from scgpt.preprocess import Preprocessor
     except ImportError:
         raise ImportError(
             "scGPT not installed. Please install it with: pip install scgpt"
@@ -100,29 +97,54 @@ def load_scgpt_model(model_dir, device):
 
     print(f"Loading model from {checkpoint_path}")
 
-    # Create model based on args
+    # Create model based on args - using correct parameter mappings from args.json
+    # args.json uses: embsize, nheads, n_bins, MVC, fast_transformer
     model = TransformerModel(
-        ntoken=model_args.get("ntoken", len(vocab) + 1),
-        d_model=model_args.get("d_model", 512),
-        nhead=model_args.get("nhead", 8),
+        ntoken=len(vocab),  # vocab size (60697 to match checkpoint)
+        d_model=model_args.get("embsize", 512),  # embsize in args.json
+        nhead=model_args.get("nheads", 8),  # nheads in args.json
         d_hid=model_args.get("d_hid", 512),
         nlayers=model_args.get("nlayers", 12),
+        vocab=vocab,  # Pass the vocabulary dict
         dropout=model_args.get("dropout", 0.2),
         pad_token=model_args.get("pad_token", "<pad>"),
-        pad_value=model_args.get("pad_value", 0),
-        do_mvc=model_args.get("do_mvc", True),
-        do_dab=model_args.get("do_dab", False),
-        use_batch_labels=model_args.get("use_batch_labels", False),
-        domain_spec_batchnorm=model_args.get("domain_spec_batchnorm", False),
-        n_input_bins=model_args.get("n_input_bins", 51),
+        pad_value=model_args.get("pad_value", -2),  # from args.json
+        do_mvc=model_args.get("MVC", True),  # MVC in args.json
+        do_dab=False,
+        use_batch_labels=False,
+        domain_spec_batchnorm=False,
+        n_input_bins=model_args.get("n_bins", 51),  # n_bins in args.json
+        input_emb_style=model_args.get("input_emb_style", "continuous"),
+        use_fast_transformer=model_args.get("fast_transformer", True),  # Uses Wqkv
     )
 
-    # Load weights
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
+    print(f"Created model with {sum(p.numel() for p in model.parameters()):,} parameters")
+
+    # Load weights with non-strict mode to handle fast-transformer key differences
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+
+    # Handle different checkpoint formats
+    if isinstance(checkpoint, dict):
+        if 'model_state_dict' in checkpoint:
+            state_dict = checkpoint['model_state_dict']
+            print("Found model_state_dict key")
+        elif 'state_dict' in checkpoint:
+            state_dict = checkpoint['state_dict']
+            print("Found state_dict key")
+        else:
+            state_dict = checkpoint
+            print("Using checkpoint dict directly as state_dict")
     else:
-        model.load_state_dict(checkpoint)
+        state_dict = checkpoint
+        print("Checkpoint is state_dict directly")
+
+    # Allow non-strict loading to accommodate fast-transformer keys (Wqkv vs in_proj)
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    print(f"Loaded with non-strict=True")
+    if missing:
+        print(f"Missing keys: {len(missing)}")
+    if unexpected:
+        print(f"Unexpected keys: {len(unexpected)}")
 
     model = model.to(device)
     model.eval()
@@ -132,7 +154,7 @@ def load_scgpt_model(model_dir, device):
     return model, model_args, vocab
 
 
-def impute_with_scgpt(model, batch, mask, device, num_steps=1):
+def impute_with_scgpt(model, batch, mask, device):
     """
     Perform imputation using scGPT model.
 
@@ -141,7 +163,6 @@ def impute_with_scgpt(model, batch, mask, device, num_steps=1):
         batch: Input data tensor [batch_size, num_genes]
         mask: Boolean mask indicating positions to impute [batch_size, num_genes]
         device: torch device
-        num_steps: Number of refinement steps (scGPT typically uses 1)
 
     Returns:
         Imputed data tensor [batch_size, num_genes]
@@ -149,25 +170,37 @@ def impute_with_scgpt(model, batch, mask, device, num_steps=1):
     with torch.no_grad():
         # Create masked input
         masked_batch = batch.clone()
-        masked_batch[mask] = 0  # Mask token is typically 0
+        masked_batch[mask] = 0  # use 0 as masked token
 
-        # Forward pass through model
-        # scGPT returns predictions for masked positions
+        # Build padding mask (no padding used here)
+        pad_mask = torch.zeros_like(masked_batch, dtype=torch.bool, device=device)
+
+        # Forward pass through model (values required by scGPT forward)
         output = model(
             masked_batch.to(device),
-            src_key_padding_mask=None,
-            batch_labels=None
+            masked_batch.to(device).float(),  # values
+            pad_mask,
+            batch_labels=None,
+            CLS=False,
+            CCE=False,
+            MVC=False,
+            ECS=False,
+            do_sample=False,
         )
 
-        # Get predictions (output is typically a dict with 'mlm_output' for masked language modeling)
+        # Get predictions (output is typically a dict with 'mlm_output')
         if isinstance(output, dict):
             predictions = output.get('mlm_output', output.get('pred', output))
         else:
             predictions = output
 
-        # Take argmax to get discrete predictions
+        # Take argmax to get discrete predictions if 3D
         if predictions.dim() == 3:  # [batch, seq, vocab]
             predictions = predictions.argmax(dim=-1)
+        
+        # scGPT mlm_output is continuous - round and convert to Long
+        if predictions.dtype != torch.long:
+            predictions = predictions.round().long()
 
         # Combine original and imputed values
         result = batch.clone()
@@ -217,18 +250,12 @@ def parse_args():
         default=0.2,
         help="Fraction of genes to mask for imputation"
     )
-    parser.add_argument(
-        "--num_steps",
-        type=int,
-        default=1,
-        help="Number of refinement steps (scGPT typically uses 1)"
-    )
 
     # Evaluation arguments
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=32,
+        default=16,
         help="Batch size for inference"
     )
     parser.add_argument(
@@ -262,8 +289,8 @@ def parse_args():
     parser.add_argument(
         "--num_workers",
         type=int,
-        default=4,
-        help="Number of data loading workers"
+        default=0,
+        help="Number of data loading workers (0 recommended for stability)"
     )
 
     return parser.parse_args()
@@ -374,8 +401,7 @@ def main():
             model=model,
             batch=batch,
             mask=mask,
-            device=device,
-            num_steps=args.num_steps
+            device=device
         )
 
         # Collect results
@@ -429,7 +455,6 @@ def main():
         "mae_bins": mae,
         "within_k": within_k_metrics,
         "mask_ratio": args.mask_ratio,
-        "num_steps": args.num_steps,
         "num_masked_positions": len(all_original_masked),
         "model_dir": str(args.model_dir)
     }
@@ -453,6 +478,7 @@ def main():
     axes[0].set_ylabel('Predicted Bin')
     axes[0].set_title('scGPT Imputation: Predicted vs True')
     axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
 
     errors = (all_predicted_masked - all_original_masked).numpy()
     axes[1].hist(errors, bins=50, alpha=0.7)
@@ -461,6 +487,7 @@ def main():
     axes[1].set_ylabel('Count')
     axes[1].set_title('Prediction Error Distribution')
     axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
 
     plt.tight_layout()
     fig.savefig(output_dir / "imputation_scatter_hist.png", dpi=150, bbox_inches='tight')
@@ -482,17 +509,19 @@ def main():
                        c='red', s=20, zorder=5, label='Masked positions')
         axes[0].set_xlabel('Gene Index')
         axes[0].set_ylabel('Expression Bin')
-        axes[0].set_title('Original Expression (masked positions highlighted)')
+        axes[0].set_title(f'Cell {cell_idx}: Original Expression (masked positions highlighted)')
         axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
 
         # Imputed
-        axes[1].bar(gene_indices, imputed_cell, alpha=0.7, label='Imputed', width=1.0)
+        axes[1].bar(gene_indices, imputed_cell, alpha=0.7, label='Imputed', width=1.0, color='green')
         axes[1].scatter(gene_indices[cell_mask], imputed_cell[cell_mask],
-                       c='green', s=20, zorder=5, label='Imputed positions')
+                       c='darkgreen', s=20, zorder=5, label='Imputed positions')
         axes[1].set_xlabel('Gene Index')
         axes[1].set_ylabel('Expression Bin')
-        axes[1].set_title('scGPT Imputed Expression')
+        axes[1].set_title(f'Cell {cell_idx}: scGPT Imputed Expression')
         axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
 
         plt.tight_layout()
         fig.savefig(output_dir / f"single_cell_{cell_idx}.png", dpi=150, bbox_inches='tight')
