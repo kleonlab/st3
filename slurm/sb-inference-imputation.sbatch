@@ -11,13 +11,13 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=amete7@gatech.edu
 
-# SLURM batch script for running imputation inference with trained SEDD model
+# SLURM batch script for running imputation inference with trained SEDD model using YAML config
 #
 # Usage:
-#   sbatch slurm/sb-inference-imputation.sbatch --experiment_dir experiments/rnaseq_diffusion_20240115_123456
+#   sbatch slurm/sb-inference-imputation.sbatch --config configs/rnaseq_small.yaml --experiment_dir experiments/rnaseq_small
 #
-# Or with custom parameters:
-#   sbatch slurm/sb-inference-imputation.sbatch --experiment_dir experiments/my_run --mask_ratio 0.3 --num_steps 100
+# Or with environment variables:
+#   CONFIG=configs/rnaseq_small.yaml EXPERIMENT_DIR=experiments/rnaseq_small sbatch slurm/sb-inference-imputation.sbatch
 
 # Change to project directory
 cd /storage/project/r-agark35-0/amete7/vla/st3 || exit 1
@@ -50,24 +50,18 @@ echo "GPU: $CUDA_VISIBLE_DEVICES"
 echo "=========================================="
 echo ""
 
-# Default inference parameters (can be overridden by environment variables or passing arguments to sbatch)
+# Default parameters (can be overridden by environment variables)
+CONFIG="${CONFIG:-configs/rnaseq_small.yaml}"
 EXPERIMENT_DIR="${EXPERIMENT_DIR:-}"
-MASK_RATIO="${MASK_RATIO:-0.2}"
-NUM_STEPS="${NUM_STEPS:-50}"
-TEMPERATURE="${TEMPERATURE:-1.0}"
-BATCH_SIZE="${BATCH_SIZE:-32}"
-NUM_BATCHES="${NUM_BATCHES:-}"
-NUM_CELLS_VISUALIZE="${NUM_CELLS_VISUALIZE:-3}"
+DATA_PATH="${DATA_PATH:-}"
 
 # Print inference configuration
 echo "Imputation Inference Configuration:"
+echo "Config file: $CONFIG"
 echo "Experiment dir: $EXPERIMENT_DIR"
-echo "Mask ratio: $MASK_RATIO"
-echo "Sampling steps: $NUM_STEPS"
-echo "Temperature: $TEMPERATURE"
-echo "Batch size: $BATCH_SIZE"
-echo "Num batches: ${NUM_BATCHES:-all}"
-echo "Num cells to visualize: $NUM_CELLS_VISUALIZE"
+if [ -n "$DATA_PATH" ]; then
+    echo "Data path: $DATA_PATH"
+fi
 echo ""
 
 # Check if experiment directory is provided
@@ -77,23 +71,27 @@ if [ -z "$EXPERIMENT_DIR" ]; then
     exit 1
 fi
 
-# Build the command arguments
-CMD_ARGS=(
-    --experiment_dir "$EXPERIMENT_DIR"
-    --mask_ratio "$MASK_RATIO"
-    --num_steps "$NUM_STEPS"
-    --temperature "$TEMPERATURE"
-    --batch_size "$BATCH_SIZE"
-    --num_cells_visualize "$NUM_CELLS_VISUALIZE"
-)
-
-# Add optional arguments if set
-if [ -n "$NUM_BATCHES" ]; then
-    CMD_ARGS+=(--num_batches "$NUM_BATCHES")
+# Check if config file exists
+if [ ! -f "$CONFIG" ]; then
+    echo "Error: Config file not found: $CONFIG"
+    exit 1
 fi
 
+# Build the command
+CMD="python scripts/inference_imputation.py --config $CONFIG --experiment_dir $EXPERIMENT_DIR"
+
+# Add data path if provided
+if [ -n "$DATA_PATH" ]; then
+    CMD="$CMD --data_path $DATA_PATH"
+fi
+
+# Add any additional command line arguments passed to sbatch
+CMD="$CMD $@"
+
 # Run inference with srun
-srun python scripts/inference_imputation.py "${CMD_ARGS[@]}" "$@"
+echo "Running command: $CMD"
+echo ""
+srun $CMD
 
 # Print completion information
 echo ""

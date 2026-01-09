@@ -24,36 +24,50 @@ from sedd.noise import LogLinearNoise
 from sedd.trainer import SEDDTrainer
 from sedd.data import train_val_split
 
-# Import TOML library (tomllib in Python 3.11+, tomli for older versions)
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
+import yaml
 
 
-def load_config(config_path="config.toml"):
-    """Load configuration from TOML file."""
-    config_file = Path(__file__).parent.parent / config_path
-    if not config_file.exists():
-        print(f"Warning: Config file not found at {config_file}, using defaults")
+def load_yaml_config(config_path):
+    """Load configuration from YAML file."""
+    if config_path is None:
         return {}
 
-    with open(config_file, "rb") as f:
-        return tomllib.load(f)
+    config_file = Path(config_path)
+    if not config_file.exists():
+        raise ValueError(f"Config file not found: {config_file}")
+
+    with open(config_file, "r") as f:
+        return yaml.safe_load(f)
 
 
 def parse_args():
-    # Load config file
-    config = load_config()
-    data_config = config.get("data", {})
-
     parser = argparse.ArgumentParser(description="Train SEDD for RNA-seq")
+
+    # Config file argument (parsed first)
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML config file (e.g., configs/rnaseq_small.yaml)"
+    )
+
+    # Parse args once to get config file
+    args, remaining = parser.parse_known_args()
+
+    # Load config file
+    config = load_yaml_config(args.config)
+    model_config = config.get("model", {})
+    data_config = config.get("data", {})
+    training_config = config.get("training", {})
+    checkpoint_config = config.get("checkpointing", {})
+    logging_config = config.get("logging", {})
+    other_config = config.get("other", {})
 
     # Data arguments
     parser.add_argument(
         "--data_path",
         type=str,
-        default=data_config.get("train_data", None),
+        default=data_config.get("data_path", None),
         help="Path to h5ad file containing RNA-seq data"
     )
     parser.add_argument(
@@ -67,25 +81,25 @@ def parse_args():
     parser.add_argument(
         "--hidden_dim",
         type=int,
-        default=128,
+        default=model_config.get("hidden_dim", 128),
         help="Hidden dimension of the transformer"
     )
     parser.add_argument(
         "--num_layers",
         type=int,
-        default=4,
+        default=model_config.get("num_layers", 4),
         help="Number of transformer layers"
     )
     parser.add_argument(
         "--num_heads",
         type=int,
-        default=4,
+        default=model_config.get("num_heads", 4),
         help="Number of attention heads"
     )
     parser.add_argument(
         "--dropout",
         type=float,
-        default=0.1,
+        default=model_config.get("dropout", 0.1),
         help="Dropout rate"
     )
 
@@ -93,37 +107,37 @@ def parse_args():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=4,
+        default=training_config.get("batch_size", 8),
         help="Batch size for training"
     )
     parser.add_argument(
         "--num_epochs",
         type=int,
-        default=2,
+        default=training_config.get("num_epochs", 100),
         help="Number of training epochs"
     )
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=1e-4,
+        default=training_config.get("learning_rate", 1e-4),
         help="Learning rate"
     )
     parser.add_argument(
         "--weight_decay",
         type=float,
-        default=0.01,
+        default=training_config.get("weight_decay", 0.01),
         help="Weight decay"
     )
     parser.add_argument(
         "--mask_ratio",
         type=float,
-        default=0.15,
+        default=training_config.get("mask_ratio", 0.15),
         help="Fraction of genes to mask during training"
     )
     parser.add_argument(
         "--gradient_clip",
         type=float,
-        default=1.0,
+        default=training_config.get("gradient_clip", 1.0),
         help="Gradient clipping value"
     )
 
@@ -131,19 +145,19 @@ def parse_args():
     parser.add_argument(
         "--checkpoint_dir",
         type=str,
-        default="experiments/rnaseq_diffusion",
+        default=checkpoint_config.get("checkpoint_dir", "experiments/rnaseq_diffusion"),
         help="Directory to save checkpoints"
     )
     parser.add_argument(
         "--save_interval",
         type=int,
-        default=10,
+        default=checkpoint_config.get("save_interval", 10),
         help="Save checkpoint every N epochs"
     )
     parser.add_argument(
         "--resume",
         type=str,
-        default=None,
+        default=checkpoint_config.get("resume", None),
         help="Path to checkpoint to resume from"
     )
 
@@ -151,13 +165,13 @@ def parse_args():
     parser.add_argument(
         "--log_interval",
         type=int,
-        default=50,
+        default=logging_config.get("log_interval", 50),
         help="Log training metrics every N steps"
     )
     parser.add_argument(
         "--val_interval",
         type=int,
-        default=1,
+        default=logging_config.get("val_interval", 1),
         help="Run validation every N epochs"
     )
 
@@ -165,13 +179,13 @@ def parse_args():
     parser.add_argument(
         "--seed",
         type=int,
-        default=42,
+        default=other_config.get("seed", 42),
         help="Random seed"
     )
     parser.add_argument(
         "--num_workers",
         type=int,
-        default=4,
+        default=other_config.get("num_workers", 4),
         help="Number of data loading workers"
     )
 

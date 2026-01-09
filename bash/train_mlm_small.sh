@@ -12,16 +12,19 @@ echo "to verify the training pipeline works."
 echo "=========================================="
 echo ""
 
-# Run with small parameters for quick test
-DATA_PATH="${DATA_PATH:-/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad}" \
-CHECKPOINT_DIR="experiments/quick_test" \
-NUM_EPOCHS=5 \
-BATCH_SIZE=16 \
-LEARNING_RATE=1e-4 \
-HIDDEN_DIM=64 \
-NUM_LAYERS=2 \
-NUM_HEADS=2 \
-./bash/train.sh \
+# Use small config and override for quick test
+DATA_PATH="${DATA_PATH:-/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad}"
+CONFIG="${CONFIG:-configs/rnaseq_small.yaml}"
+
+python scripts/train_rnaseq.py \
+    --config "$CONFIG" \
+    --data_path "$DATA_PATH" \
+    --checkpoint_dir "experiments/quick_test" \
+    --num_epochs 5 \
+    --batch_size 16 \
+    --hidden_dim 64 \
+    --num_layers 2 \
+    --num_heads 2 \
     --log_interval 10 \
     --val_interval 1
 

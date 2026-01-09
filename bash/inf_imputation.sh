@@ -1,50 +1,41 @@
 #!/bin/bash
 #
-# Quick inference script for imputation using a trained SEDD checkpoint.
-# Mirrors train_quick.sh style: sets sensible defaults and runs inference.
+# Inference script for imputation using a trained SEDD checkpoint with YAML config
+# Usage: ./bash/inf_imputation.sh --config configs/rnaseq_small.yaml --experiment_dir experiments/rnaseq_small --data_path /path/to/data.h5ad
+#        or: CONFIG=configs/rnaseq_small.yaml EXPERIMENT_DIR=experiments/rnaseq_small ./bash/inf_imputation.sh
 #
 
 echo "=========================================="
-echo "Quick Imputation - SEDD RNA-seq"
-echo "=========================================="
-echo "This will run imputation on a small batch"
-echo "using an existing trained checkpoint."
+echo "Imputation Inference - SEDD RNA-seq"
 echo "=========================================="
 echo ""
 
-# Defaults (override via environment variables before running)
+# Defaults (override via environment variables or command line)
+CONFIG="${CONFIG:-configs/rnaseq_small.yaml}"
 EXPERIMENT_DIR="${EXPERIMENT_DIR:-experiments/quick_test}"
-CHECKPOINT="${CHECKPOINT:-""}"  # optional specific checkpoint path
-DATA_PATH="${DATA_PATH:-/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad}"
-MASK_RATIO="${MASK_RATIO:-0.2}"
-NUM_STEPS="${NUM_STEPS:-50}"
-TEMPERATURE="${TEMPERATURE:-1.0}"
-BATCH_SIZE="${BATCH_SIZE:-16}"
-NUM_BATCHES="${NUM_BATCHES:-1}"          # evaluate first N batches (set empty for all)
-NUM_CELLS_VIZ="${NUM_CELLS_VIZ:-3}"
+DATA_PATH="${DATA_PATH:-}"
 
+echo "Config file    : ${CONFIG}"
 echo "Experiment dir : ${EXPERIMENT_DIR}"
-echo "Checkpoint     : ${CHECKPOINT:-auto (best/final/latest)}"
-echo "Data path      : ${DATA_PATH}"
-echo "Mask ratio     : ${MASK_RATIO}"
-echo "Num steps      : ${NUM_STEPS}"
-echo "Batch size     : ${BATCH_SIZE}"
-echo "Num batches    : ${NUM_BATCHES}"
-echo "Cells to plot  : ${NUM_CELLS_VIZ}"
+if [ -n "$DATA_PATH" ]; then
+    echo "Data path      : ${DATA_PATH}"
+fi
 echo "=========================================="
 echo ""
+
+# Build command
+CMD="python scripts/inference_imputation.py --config $CONFIG --experiment_dir $EXPERIMENT_DIR"
+
+# Add data path if provided
+if [ -n "$DATA_PATH" ]; then
+    CMD="$CMD --data_path $DATA_PATH"
+fi
+
+# Add any additional command line arguments
+CMD="$CMD $@"
 
 # Run inference
-uv run scripts/inference_imputation.py \
-    --experiment_dir "${EXPERIMENT_DIR}" \
-    ${CHECKPOINT:+--checkpoint "${CHECKPOINT}"} \
-    --data_path "${DATA_PATH}" \
-    --mask_ratio "${MASK_RATIO}" \
-    --num_steps "${NUM_STEPS}" \
-    --temperature "${TEMPERATURE}" \
-    --batch_size "${BATCH_SIZE}" \
-    ${NUM_BATCHES:+--num_batches "${NUM_BATCHES}"} \
-    --num_cells_visualize "${NUM_CELLS_VIZ}"
+eval $CMD
 
 echo ""
 echo "=========================================="

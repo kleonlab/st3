@@ -29,22 +29,20 @@ from sedd.trainer import SEDDTrainer
 from sedd.data import train_val_split
 from sedd.sampling import impute_masked
 
-# Import TOML library
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
+import yaml
 
 
-def load_config(config_path="config.toml"):
-    """Load configuration from TOML file."""
-    config_file = Path(__file__).parent.parent / config_path
-    if not config_file.exists():
-        print(f"Warning: Config file not found at {config_file}, using defaults")
+def load_yaml_config(config_path):
+    """Load configuration from YAML file."""
+    if config_path is None:
         return {}
 
-    with open(config_file, "rb") as f:
-        return tomllib.load(f)
+    config_file = Path(config_path)
+    if not config_file.exists():
+        raise ValueError(f"Config file not found: {config_file}")
+
+    with open(config_file, "r") as f:
+        return yaml.safe_load(f)
 
 
 def find_checkpoint(experiment_dir):
@@ -86,11 +84,24 @@ def find_checkpoint(experiment_dir):
 
 
 def parse_args():
-    # Load config file
-    config = load_config()
-    data_config = config.get("data", {})
-
     parser = argparse.ArgumentParser(description="Run imputation inference with trained SEDD model")
+
+    # Config file argument (parsed first)
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML config file (e.g., configs/rnaseq_small.yaml)"
+    )
+
+    # Parse args once to get config file
+    args, remaining = parser.parse_known_args()
+
+    # Load config file
+    config = load_yaml_config(args.config)
+    data_config = config.get("data", {})
+    inference_config = config.get("inference", {})
+    other_config = config.get("other", {})
 
     # Experiment/checkpoint arguments
     parser.add_argument(
@@ -110,8 +121,8 @@ def parse_args():
     parser.add_argument(
         "--data_path",
         type=str,
-        default=data_config.get("test_data", None) or data_config.get("train_data", None),
-        help="Path to h5ad file containing test data (defaults to config.toml)"
+        default=data_config.get("data_path", None),
+        help="Path to h5ad file containing test data"
     )
     parser.add_argument(
         "--val_fraction",
@@ -129,25 +140,25 @@ def parse_args():
     parser.add_argument(
         "--mask_ratio",
         type=float,
-        default=0.2,
+        default=inference_config.get("mask_ratio", 0.2),
         help="Fraction of genes to mask for imputation"
     )
     parser.add_argument(
         "--num_steps",
         type=int,
-        default=50,
+        default=inference_config.get("num_steps", 50),
         help="Number of sampling steps for imputation"
     )
     parser.add_argument(
         "--temperature",
         type=float,
-        default=1.0,
+        default=inference_config.get("temperature", 1.0),
         help="Sampling temperature"
     )
     parser.add_argument(
         "--sampler",
         type=str,
-        default="euler",
+        default=inference_config.get("sampler", "euler"),
         choices=["euler"],
         help="Sampler to use for imputation"
     )
@@ -156,19 +167,19 @@ def parse_args():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=32,
+        default=inference_config.get("batch_size", 32),
         help="Batch size for inference"
     )
     parser.add_argument(
         "--num_batches",
         type=int,
-        default=None,
+        default=inference_config.get("num_batches", None),
         help="Number of batches to evaluate (None = all)"
     )
     parser.add_argument(
         "--num_cells_visualize",
         type=int,
-        default=3,
+        default=inference_config.get("num_cells_visualize", 3),
         help="Number of individual cells to visualize"
     )
 
@@ -176,13 +187,13 @@ def parse_args():
     parser.add_argument(
         "--seed",
         type=int,
-        default=42,
+        default=other_config.get("seed", 42),
         help="Random seed"
     )
     parser.add_argument(
         "--num_workers",
         type=int,
-        default=4,
+        default=other_config.get("num_workers", 4),
         help="Number of data loading workers"
     )
 
