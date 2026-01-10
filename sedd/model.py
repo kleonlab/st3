@@ -1,9 +1,3 @@
-"""
-Transformer model for Score-Entropy Discrete Diffusion.
-
-Adapted for gene expression prediction on single-cell RNA-seq data.
-"""
-
 import math
 import torch
 import torch.nn as nn
@@ -67,7 +61,6 @@ def rotate_half(x: Tensor) -> Tensor:
 
 
 def apply_rotary_emb(x: Tensor, freqs: Tensor) -> Tensor:
-    """Apply rotary embeddings to input tensor."""
     cos = freqs.cos().unsqueeze(0).unsqueeze(0)  # [1, 1, seq, dim]
     sin = freqs.sin().unsqueeze(0).unsqueeze(0)
     return (x * cos) + (rotate_half(x) * sin)
@@ -222,14 +215,6 @@ class TransformerBlock(nn.Module):
 
 
 class SEDDTransformer(nn.Module):
-    """SEDD Transformer for discrete diffusion on gene expression.
-
-    Architecture:
-    - Token embedding for discretized gene expression
-    - Time embedding via sinusoidal + MLP
-    - Transformer blocks with adaptive layer norm
-    - Output projection to score over vocabulary
-    """
 
     def __init__(
         self,
@@ -242,17 +227,7 @@ class SEDDTransformer(nn.Module):
         dropout: float = 0.1,
         max_seq_len: int = 4096,
     ):
-        """
-        Args:
-            num_genes: Number of genes (sequence length)
-            num_bins: Number of expression bins (vocabulary size, excluding mask)
-            hidden_dim: Transformer hidden dimension
-            num_layers: Number of transformer layers
-            num_heads: Number of attention heads
-            ff_mult: Feed-forward dimension multiplier
-            dropout: Dropout probability
-            max_seq_len: Maximum sequence length
-        """
+
         super().__init__()
         self.num_genes = num_genes
         self.num_bins = num_bins
@@ -262,13 +237,10 @@ class SEDDTransformer(nn.Module):
 
         ff_dim = int(hidden_dim * ff_mult)
 
-        # Token embedding
         self.token_embed = nn.Embedding(self.vocab_size, hidden_dim)
 
-        # Gene position embedding (learnable)
         self.gene_embed = nn.Embedding(max_seq_len, hidden_dim)
 
-        # Time embedding
         self.time_embed = nn.Sequential(
             SinusoidalEmbedding(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim * 4),
@@ -276,21 +248,17 @@ class SEDDTransformer(nn.Module):
             nn.Linear(hidden_dim * 4, hidden_dim),
         )
 
-        # Transformer blocks
         self.blocks = nn.ModuleList([
             TransformerBlock(hidden_dim, num_heads, ff_dim, hidden_dim, dropout)
             for _ in range(num_layers)
         ])
 
-        # Output layer
         self.out_norm = AdaptiveLayerNorm(hidden_dim, hidden_dim)
         self.out_proj = nn.Linear(hidden_dim, self.vocab_size, bias=False)
 
-        # Initialize
         self._init_weights()
 
     def _init_weights(self):
-        """Initialize weights with small values for stable training."""
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 nn.init.normal_(module.weight, std=0.02)
@@ -305,38 +273,23 @@ class SEDDTransformer(nn.Module):
         sigma: Tensor,
         mask: Optional[Tensor] = None,
     ) -> Tensor:
-        """
-        Forward pass computing score estimates.
 
-        Args:
-            x: Token indices [batch_size, seq_len]
-            sigma: Noise level [batch_size] or scalar
-            mask: Optional attention mask [batch_size, seq_len]
-
-        Returns:
-            Score logits [batch_size, seq_len, vocab_size]
-        """
         batch_size, seq_len = x.shape
         device = x.device
 
-        # Ensure sigma has correct shape
         if sigma.dim() == 0:
             sigma = sigma.expand(batch_size)
 
-        # Embeddings
         tok_emb = self.token_embed(x)
         pos_idx = torch.arange(seq_len, device=device)
         pos_emb = self.gene_embed(pos_idx).unsqueeze(0)
         h = tok_emb + pos_emb
 
-        # Time conditioning
         t_emb = self.time_embed(sigma)
 
-        # Transformer blocks
         for block in self.blocks:
             h = block(h, t_emb, mask)
 
-        # Output projection
         h = self.out_norm(h, t_emb)
         logits = self.out_proj(h)
 
@@ -348,23 +301,9 @@ class SEDDTransformer(nn.Module):
         sigma: Tensor,
         mask: Optional[Tensor] = None,
     ) -> Tensor:
-        """Compute the score: log p(x) gradient w.r.t. discrete states.
 
-        For absorbing diffusion, the score represents the ratio
-        p(clean | noised) / p(noised).
-
-        Args:
-            x: Noised token indices [batch_size, seq_len]
-            sigma: Noise level
-            mask: Optional attention mask
-
-        Returns:
-            Score tensor [batch_size, seq_len, vocab_size]
-        """
         logits = self.forward(x, sigma, mask)
 
-        # For absorbing diffusion, we apply softmax and adjust
-        # The score should be 0 for staying in mask state
         score = F.log_softmax(logits, dim=-1)
 
         return score
@@ -377,43 +316,23 @@ class SEDDTransformer(nn.Module):
         graph,
         mask: Optional[Tensor] = None,
     ) -> Tensor:
-        """Compute the SEDD loss.
 
-        The loss is the score entropy: matching predicted score to true score.
-
-        Args:
-            x_clean: Original clean data [batch_size, seq_len]
-            x_noised: Noised data [batch_size, seq_len]
-            sigma: Noise level
-            graph: Graph object for computing true score
-            mask: Optional mask for which positions to include
-
-        Returns:
-            Scalar loss value
-        """
-        # Get predicted score
         pred_score = self.score(x_noised, sigma, mask)
 
-        # For absorbing diffusion, the true score at masked positions
-        # should point to the original clean token
-        # Loss is cross-entropy at masked positions
         is_masked = (x_noised == self.mask_index)
 
         if not is_masked.any():
             return torch.tensor(0.0, device=x_clean.device)
 
-        # Get predictions at masked positions
         pred_at_mask = pred_score[is_masked]  # [num_masked, vocab_size]
         target_at_mask = x_clean[is_masked]   # [num_masked]
 
-        # Cross-entropy loss
         loss = F.cross_entropy(pred_at_mask, target_at_mask)
 
         return loss
 
 
 class SEDDTransformerSmall(SEDDTransformer):
-    """Small SEDD Transformer for quick experiments."""
 
     def __init__(self, num_genes: int, num_bins: int, **kwargs):
         defaults = dict(
@@ -428,7 +347,6 @@ class SEDDTransformerSmall(SEDDTransformer):
 
 
 class SEDDTransformerMedium(SEDDTransformer):
-    """Medium SEDD Transformer."""
 
     def __init__(self, num_genes: int, num_bins: int, **kwargs):
         defaults = dict(
@@ -443,7 +361,6 @@ class SEDDTransformerMedium(SEDDTransformer):
 
 
 class SEDDTransformerLarge(SEDDTransformer):
-    """Large SEDD Transformer."""
 
     def __init__(self, num_genes: int, num_bins: int, **kwargs):
         defaults = dict(
