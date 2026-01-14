@@ -129,7 +129,7 @@ def parse_args():
     parser.add_argument(
         "--num_epochs",
         type=int,
-        default=training_config.get("num_epochs", 100),
+        default=training_config.get("num_epochs", 10),
         help="Number of training epochs"
     )
     parser.add_argument(
@@ -167,7 +167,7 @@ def parse_args():
     parser.add_argument(
         "--save_interval",
         type=int,
-        default=checkpoint_config.get("save_interval", 10),
+        default=checkpoint_config.get("save_interval", 2),
         help="Save checkpoint every N epochs"
     )
     parser.add_argument(
@@ -181,7 +181,7 @@ def parse_args():
     parser.add_argument(
         "--log_interval",
         type=int,
-        default=logging_config.get("log_interval", 50),
+        default=logging_config.get("log_interval", 5),
         help="Log training metrics every N steps"
     )
     parser.add_argument(

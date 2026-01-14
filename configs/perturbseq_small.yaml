@@ -12,7 +12,7 @@ model:
 
 # Data parameters
 data:
-  data_path: null  # Must be specified via CLI or environment variable
+  data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/competition_support_set/hepg2.h5  # Must be specified via CLI or environment variable
   pert_col: perturbation  # Column in adata.obs with perturbation labels
   control_name: control  # Name of control perturbation
   val_fraction: 0.1
@@ -31,7 +31,7 @@ training:
 
 # Checkpoint and logging
 checkpointing:
-  checkpoint_dir: experiments/perturbseq_small
+  checkpoint_dir: experiments/psed_demo/perturbseq_small
   save_interval: 10
   resume: null  # Path to checkpoint to resume from
 
