@@ -5,6 +5,11 @@ now all the requirements are downloaded and setup.
 
 - the demo_rnaseq is a complete running example. 
 
+## branch guide 
+1. score-rnaseq: pre yaml setup 
+2. exprnaseq for sidequest exps using the same files as in st3 
+3. scorernase2: running file. 
+
 ## Overview
 
 This library adapts discrete diffusion models for gene expression prediction:
