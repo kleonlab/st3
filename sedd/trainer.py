@@ -276,4 +276,275 @@ def create_trainer(
     )
 
 
-#add a new class for perturb seq trainer here.  
+class PerturbationTrainer:
+    """Trainer for perturbation prediction using discrete diffusion.
+
+    This trainer handles the perturbation prediction task:
+    - Input: control cell + perturbation label
+    - Output: predicted perturbed cell
+
+    Training procedure:
+    1. Sample diffusion time t
+    2. Apply discrete diffusion (masking) to the perturbed cell
+    3. Model predicts the perturbed cell from: masked_perturbed + perturbation_label
+    4. Loss: cross-entropy at masked positions
+
+    Note: We could also condition on control cells, but following STATE,
+    we primarily condition on the perturbation label and learn the perturbation effect.
+    """
+
+    def __init__(
+        self,
+        model: nn.Module,
+        graph: Graph,
+        noise: NoiseSchedule,
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+        device: torch.device = None,
+        gradient_clip: float = 1.0,
+    ):
+        self.model = model
+        self.graph = graph
+        self.noise = noise
+        self.gradient_clip = gradient_clip
+
+        self.device = device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+        self.model = self.model.to(self.device)
+
+        self.optimizer = optimizer or torch.optim.AdamW(
+            model.parameters(),
+            lr=1e-4,
+            weight_decay=0.01,
+            betas=(0.9, 0.999),
+        )
+        self.scheduler = scheduler
+        self.step = 0
+        self.epoch = 0
+        self.best_loss = float("inf")
+        self.history = {"train_loss": [], "val_loss": []}
+
+    def compute_loss(
+        self,
+        control: Tensor,
+        pert_labels: Tensor,
+        perturbed: Tensor,
+        mask_ratio: float = 0.15,
+    ) -> Tensor:
+        """
+        Compute perturbation prediction loss.
+
+        Args:
+            control: Control cell expression [batch, seq_len] (currently unused but available)
+            pert_labels: Perturbation labels [batch]
+            perturbed: True perturbed expression [batch, seq_len]
+            mask_ratio: Masking ratio (used by absorbing graph)
+
+        Returns:
+            Cross-entropy loss at masked positions
+        """
+        batch_size, seq_len = perturbed.shape
+        device = perturbed.device
+
+        # Sample diffusion time
+        t = torch.rand(batch_size, device=device)
+        sigma = self.noise.total(t)
+
+        # Apply discrete diffusion (masking) to perturbed cells
+        if isinstance(self.graph, AbsorbingGraph):
+            x_noised = self._mask_tokens(perturbed, mask_ratio, sigma)
+        else:
+            x_noised = self.graph.sample_transition(perturbed, sigma)
+
+        # Model predicts perturbed from noised + perturbation label
+        loss = self.model.get_loss(
+            x_control=control,
+            x_perturbed=perturbed,
+            x_noised=x_noised,
+            sigma=sigma,
+            pert_labels=pert_labels,
+            graph=self.graph,
+        )
+
+        return loss
+
+    def _mask_tokens(
+        self,
+        x: Tensor,
+        mask_ratio: float,
+        sigma: Tensor,
+    ) -> Tensor:
+        """Apply masking to tokens based on diffusion time."""
+        batch_size, seq_len = x.shape
+        device = x.device
+        mask_idx = self.graph.mask_index
+
+        # Masking probability based on diffusion time
+        p_mask = 1 - torch.exp(-sigma)  # [batch_size]
+        p_mask = p_mask.view(-1, 1)  # [batch_size, 1]
+
+        # Sample mask positions
+        mask = torch.rand(batch_size, seq_len, device=device) < p_mask
+
+        # Apply masking
+        x_masked = x.clone()
+        x_masked[mask] = mask_idx
+
+        return x_masked
+
+    def train_step(
+        self,
+        batch: Tuple[Tensor, Tensor, Tensor],
+        mask_ratio: float = 0.15
+    ) -> float:
+        """Single training step."""
+        self.model.train()
+        self.optimizer.zero_grad()
+
+        # Unpack batch
+        control, pert_labels, perturbed = batch
+        control = control.to(self.device)
+        pert_labels = pert_labels.to(self.device)
+        perturbed = perturbed.to(self.device)
+
+        # Compute loss
+        loss = self.compute_loss(control, pert_labels, perturbed, mask_ratio)
+
+        # Backward pass
+        loss.backward()
+
+        if self.gradient_clip > 0:
+            nn.utils.clip_grad_norm_(
+                self.model.parameters(),
+                self.gradient_clip
+            )
+
+        self.optimizer.step()
+        self.step += 1
+
+        return loss.item()
+
+    @torch.no_grad()
+    def validate(
+        self,
+        val_loader: DataLoader,
+        mask_ratio: float = 0.15,
+    ) -> float:
+        """Validation loop."""
+        self.model.eval()
+        total_loss = 0.0
+        num_batches = 0
+
+        for batch in val_loader:
+            control, pert_labels, perturbed = batch
+            control = control.to(self.device)
+            pert_labels = pert_labels.to(self.device)
+            perturbed = perturbed.to(self.device)
+
+            loss = self.compute_loss(control, pert_labels, perturbed, mask_ratio)
+            total_loss += loss.item()
+            num_batches += 1
+
+        return total_loss / max(num_batches, 1)
+
+    def train(
+        self,
+        train_loader: DataLoader,
+        val_loader: Optional[DataLoader] = None,
+        num_epochs: int = 100,
+        mask_ratio: float = 0.15,
+        log_interval: int = 100,
+        val_interval: int = 1,
+        checkpoint_dir: Optional[str] = None,
+        callback: Optional[Callable] = None,
+    ) -> Dict[str, Any]:
+        """Training loop."""
+        if checkpoint_dir:
+            checkpoint_dir = Path(checkpoint_dir)
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        for epoch in range(num_epochs):
+            self.epoch = epoch
+
+            epoch_loss = 0.0
+            num_batches = 0
+
+            pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}")
+            for batch in pbar:
+                loss = self.train_step(batch, mask_ratio)
+                epoch_loss += loss
+                num_batches += 1
+
+                if self.step % log_interval == 0:
+                    pbar.set_postfix({"loss": f"{loss:.4f}"})
+
+            avg_train_loss = epoch_loss / max(num_batches, 1)
+            self.history["train_loss"].append(avg_train_loss)
+
+            val_loss = None
+            if val_loader and (epoch + 1) % val_interval == 0:
+                val_loss = self.validate(val_loader, mask_ratio)
+                self.history["val_loss"].append(val_loss)
+
+                if self.scheduler:
+                    if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                        self.scheduler.step(val_loss)
+                    else:
+                        self.scheduler.step()
+
+                if val_loss < self.best_loss:
+                    self.best_loss = val_loss
+                    if checkpoint_dir:
+                        self.save_checkpoint(checkpoint_dir / "best.pt")
+
+            log_msg = f"Epoch {epoch + 1}: train_loss={avg_train_loss:.4f}"
+            if val_loss is not None:
+                log_msg += f", val_loss={val_loss:.4f}"
+            print(log_msg)
+
+            if callback:
+                metrics = {
+                    "train_loss": avg_train_loss,
+                    "val_loss": val_loss,
+                }
+                callback(self, epoch, metrics)
+
+            if checkpoint_dir and (epoch + 1) % 10 == 0:
+                self.save_checkpoint(checkpoint_dir / f"epoch_{epoch + 1}.pt")
+
+        if checkpoint_dir:
+            self.save_checkpoint(checkpoint_dir / "final.pt")
+
+        return self.history
+
+    def save_checkpoint(self, path: str):
+        """Save training checkpoint."""
+        checkpoint = {
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "step": self.step,
+            "epoch": self.epoch,
+            "best_loss": self.best_loss,
+            "history": self.history,
+        }
+        if self.scheduler:
+            checkpoint["scheduler_state_dict"] = self.scheduler.state_dict()
+
+        torch.save(checkpoint, path)
+
+    def load_checkpoint(self, path: str, load_optimizer: bool = True):
+        """Load training checkpoint."""
+        checkpoint = torch.load(path, map_location=self.device)
+
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.step = checkpoint.get("step", 0)
+        self.epoch = checkpoint.get("epoch", 0)
+        self.best_loss = checkpoint.get("best_loss", float("inf"))
+        self.history = checkpoint.get("history", {"train_loss": [], "val_loss": []})
+
+        if load_optimizer and "optimizer_state_dict" in checkpoint:
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+        if self.scheduler and "scheduler_state_dict" in checkpoint:
+            self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])  

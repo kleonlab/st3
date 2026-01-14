@@ -1,11 +1,21 @@
 
 from .noise import LogLinearNoise, GeometricNoise, get_noise_schedule
 from .graph import AbsorbingGraph, UniformGraph, get_graph
-from .model import SEDDTransformer, SEDDTransformerSmall, SEDDTransformerMedium, SEDDTransformerLarge
+from .model import (
+    SEDDTransformer,
+    SEDDTransformerSmall,
+    SEDDTransformerMedium,
+    SEDDTransformerLarge,
+    SEDDPerturbationTransformer,
+    SEDDPerturbationTransformerSmall,
+    SEDDPerturbationTransformerMedium,
+    SEDDPerturbationTransformerLarge,
+)
 from .sampling import EulerSampler, AnalyticSampler, impute_masked, get_sampler
-from .trainer import SEDDTrainer, create_trainer
+from .trainer import SEDDTrainer, PerturbationTrainer, create_trainer
 from .data import (
     RNASeqDataset,
+    PerturbSeqDataset,
     train_val_split,
 )
 
@@ -24,6 +34,10 @@ __all__ = [
     "SEDDTransformerSmall",
     "SEDDTransformerMedium",
     "SEDDTransformerLarge",
+    "SEDDPerturbationTransformer",
+    "SEDDPerturbationTransformerSmall",
+    "SEDDPerturbationTransformerMedium",
+    "SEDDPerturbationTransformerLarge",
     # Sampling
     "EulerSampler",
     "AnalyticSampler",
@@ -31,8 +45,10 @@ __all__ = [
     "get_sampler",
     # Training
     "SEDDTrainer",
+    "PerturbationTrainer",
     "create_trainer",
     # Data
     "RNASeqDataset",
+    "PerturbSeqDataset",
     "train_val_split",
 ]

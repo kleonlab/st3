@@ -374,4 +374,216 @@ class SEDDTransformerLarge(SEDDTransformer):
         super().__init__(num_genes, num_bins, **defaults)
 
 
-# add a new model for perturb seq incorporation here. 
+class SEDDPerturbationTransformer(SEDDTransformer):
+    """SEDD Transformer with perturbation conditioning for control -> perturbed prediction.
+
+    This model extends SEDDTransformer to condition on perturbation labels,
+    enabling prediction of perturbed cell states from control cells.
+
+    Architecture:
+        - Inherits token, gene, and time embeddings from SEDDTransformer
+        - Adds perturbation embedding for conditioning
+        - Combines time and perturbation embeddings for adaptive layer norm
+
+    Training:
+        - Input: control cell expression + perturbation label
+        - Target: perturbed cell expression
+        - Uses discrete diffusion with masking
+    """
+
+    def __init__(
+        self,
+        num_genes: int,
+        num_bins: int,
+        num_perturbations: int,
+        hidden_dim: int = 256,
+        num_layers: int = 6,
+        num_heads: int = 8,
+        ff_mult: float = 4.0,
+        dropout: float = 0.1,
+        max_seq_len: int = 4096,
+    ):
+        """
+        Args:
+            num_genes: Number of genes (sequence length)
+            num_bins: Number of expression bins (vocabulary size, excluding mask)
+            num_perturbations: Number of unique perturbation conditions
+            hidden_dim: Transformer hidden dimension
+            num_layers: Number of transformer blocks
+            num_heads: Number of attention heads
+            ff_mult: Feed-forward expansion factor
+            dropout: Dropout rate
+            max_seq_len: Maximum sequence length
+        """
+        super().__init__(
+            num_genes=num_genes,
+            num_bins=num_bins,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            ff_mult=ff_mult,
+            dropout=dropout,
+            max_seq_len=max_seq_len,
+        )
+
+        self.num_perturbations = num_perturbations
+
+        # Perturbation embedding
+        self.pert_embed = nn.Embedding(num_perturbations, hidden_dim)
+
+        # Update time embedding to also incorporate perturbation
+        # New conditioning will be: time_emb + pert_emb
+        self.pert_proj = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 4),
+            nn.GELU(),
+            nn.Linear(hidden_dim * 4, hidden_dim),
+        )
+
+        self._init_weights()
+
+    def forward(
+        self,
+        x: Tensor,
+        sigma: Tensor,
+        pert_labels: Tensor,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """
+        Args:
+            x: Input tokens [batch, seq_len]
+            sigma: Diffusion time [batch] or scalar
+            pert_labels: Perturbation labels [batch]
+            mask: Optional attention mask [batch, seq_len]
+
+        Returns:
+            Logits [batch, seq_len, vocab_size]
+        """
+        batch_size, seq_len = x.shape
+        device = x.device
+
+        if sigma.dim() == 0:
+            sigma = sigma.expand(batch_size)
+
+        # Token and position embeddings
+        tok_emb = self.token_embed(x)
+        pos_idx = torch.arange(seq_len, device=device)
+        pos_emb = self.gene_embed(pos_idx).unsqueeze(0)
+        h = tok_emb + pos_emb
+
+        # Time embedding
+        t_emb = self.time_embed(sigma)
+
+        # Perturbation embedding
+        p_emb = self.pert_embed(pert_labels)
+        p_emb = self.pert_proj(p_emb)
+
+        # Combined conditioning: time + perturbation
+        cond = t_emb + p_emb
+
+        # Transformer blocks
+        for block in self.blocks:
+            h = block(h, cond, mask)
+
+        # Output
+        h = self.out_norm(h, cond)
+        logits = self.out_proj(h)
+
+        return logits
+
+    def score(
+        self,
+        x: Tensor,
+        sigma: Tensor,
+        pert_labels: Tensor,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """Compute log probabilities (scores) for each token."""
+        logits = self.forward(x, sigma, pert_labels, mask)
+        score = F.log_softmax(logits, dim=-1)
+        return score
+
+    def get_loss(
+        self,
+        x_control: Tensor,
+        x_perturbed: Tensor,
+        x_noised: Tensor,
+        sigma: Tensor,
+        pert_labels: Tensor,
+        graph,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """
+        Compute perturbation prediction loss.
+
+        Args:
+            x_control: Control cell expression [batch, seq_len]
+            x_perturbed: True perturbed expression (target) [batch, seq_len]
+            x_noised: Noised perturbed expression (input) [batch, seq_len]
+            sigma: Diffusion time [batch]
+            pert_labels: Perturbation labels [batch]
+            graph: Diffusion graph (for mask index)
+            mask: Optional attention mask
+
+        Returns:
+            Cross-entropy loss at masked positions
+        """
+        # Predict perturbed expression from noised perturbed + perturbation label
+        pred_score = self.score(x_noised, sigma, pert_labels, mask)
+
+        # Only compute loss at masked positions
+        is_masked = (x_noised == self.mask_index)
+
+        if not is_masked.any():
+            return torch.tensor(0.0, device=x_perturbed.device)
+
+        pred_at_mask = pred_score[is_masked]  # [num_masked, vocab_size]
+        target_at_mask = x_perturbed[is_masked]  # [num_masked]
+
+        loss = F.cross_entropy(pred_at_mask, target_at_mask)
+
+        return loss
+
+
+class SEDDPerturbationTransformerSmall(SEDDPerturbationTransformer):
+    """Small version of perturbation transformer."""
+
+    def __init__(self, num_genes: int, num_bins: int, num_perturbations: int, **kwargs):
+        defaults = dict(
+            hidden_dim=128,
+            num_layers=4,
+            num_heads=4,
+            ff_mult=4.0,
+            dropout=0.1,
+        )
+        defaults.update(kwargs)
+        super().__init__(num_genes, num_bins, num_perturbations, **defaults)
+
+
+class SEDDPerturbationTransformerMedium(SEDDPerturbationTransformer):
+    """Medium version of perturbation transformer."""
+
+    def __init__(self, num_genes: int, num_bins: int, num_perturbations: int, **kwargs):
+        defaults = dict(
+            hidden_dim=256,
+            num_layers=6,
+            num_heads=8,
+            ff_mult=4.0,
+            dropout=0.1,
+        )
+        defaults.update(kwargs)
+        super().__init__(num_genes, num_bins, num_perturbations, **defaults)
+
+
+class SEDDPerturbationTransformerLarge(SEDDPerturbationTransformer):
+    """Large version of perturbation transformer."""
+
+    def __init__(self, num_genes: int, num_bins: int, num_perturbations: int, **kwargs):
+        defaults = dict(
+            hidden_dim=512,
+            num_layers=8,
+            num_heads=8,
+            ff_mult=4.0,
+            dropout=0.1,
+        )
+        defaults.update(kwargs)
+        super().__init__(num_genes, num_bins, num_perturbations, **defaults) 
