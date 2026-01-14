@@ -88,146 +88,139 @@ def train_val_split(
     return train_dataset, val_dataset
 
 
-def discretize_expression(
-    expression: Union[Tensor, Array],
-    num_bins: int = 100,
-    method: str = "linear",
-) -> Tuple[Tensor, dict]:
-    """Discretize continuous expression values into bins.
-    
-    Args:
-        expression: Continuous expression values [num_cells, num_genes]
-        num_bins: Number of discrete bins
-        method: Discretization method ('linear', 'log', 'quantile')
-    
-    Returns:
-        Tuple of (discretized tensor, metadata dict for undiscretization)
+class PerturbSeqDataset(Dataset):
+    """Dataset for perturbation-seq data with control-perturbed pairs.
+
+    This dataset handles single-cell perturbation data where each sample consists of:
+    - Control cell expression (baseline/unperturbed)
+    - Perturbation label (which gene/condition was perturbed)
+    - Perturbed cell expression (outcome after perturbation)
+
+    The dataset expects AnnData format with:
+    - X: Expression matrix (cells × genes), already discretized
+    - obs[pert_col]: Column containing perturbation labels
+    - obs[control_col]: Optional column marking control cells
+
+    For training, control cells are matched with perturbed cells having the same
+    perturbation label to create (control, perturbation, perturbed) triplets.
     """
-    if isinstance(expression, np.ndarray):
-        expression = torch.from_numpy(expression).float()
-    
-    min_val = expression.min().item()
-    max_val = expression.max().item()
-    
-    if method == "log":
-        # Log transform first (add 1 to handle zeros)
-        expression = torch.log1p(expression)
-        min_val = expression.min().item()
-        max_val = expression.max().item()
-    
-    # Linear binning
-    if max_val > min_val:
-        normalized = (expression - min_val) / (max_val - min_val)
-        discretized = (normalized * (num_bins - 1)).long()
-        discretized = discretized.clamp(0, num_bins - 1)
-    else:
-        discretized = torch.zeros_like(expression).long()
-    
-    metadata = {
-        "num_bins": num_bins,
-        "min_val": min_val,
-        "max_val": max_val,
-        "method": method,
-    }
-    
-    return discretized, metadata
 
+    def __init__(
+        self,
+        expression: Union[Tensor, Array],
+        pert_labels: Union[Tensor, Array, List[str]],
+        control_expression: Optional[Union[Tensor, Array]] = None,
+        gene_names: Optional[List[str]] = None,
+        num_bins: int = 100,
+        control_pert_name: str = "control",
+    ):
+        """
+        Args:
+            expression: Expression matrix [num_cells, num_genes], already discretized
+            pert_labels: Perturbation labels [num_cells], either indices or names
+            control_expression: Optional separate control expression matrix.
+                If None, control cells are identified from pert_labels.
+            gene_names: Optional list of gene names
+            num_bins: Number of expression bins
+            control_pert_name: Name of control perturbation in pert_labels
+        """
+        # Convert to tensors
+        if not isinstance(expression, Tensor):
+            expression = torch.from_numpy(expression).long()
+        self.expression = expression
 
-def undiscretize_expression(
-    discretized: Tensor,
-    metadata: dict,
-) -> Tensor:
-    """Convert discretized expression back to continuous values.
-    
-    Args:
-        discretized: Discretized expression tensor
-        metadata: Metadata from discretize_expression
-    
-    Returns:
-        Continuous expression tensor
-    """
-    num_bins = metadata["num_bins"]
-    min_val = metadata["min_val"]
-    max_val = metadata["max_val"]
-    method = metadata.get("method", "linear")
-    
-    # Convert to float and normalize to [0, 1]
-    normalized = discretized.float() / (num_bins - 1)
-    
-    # Scale back to original range
-    continuous = normalized * (max_val - min_val) + min_val
-    
-    if method == "log":
-        # Inverse log transform
-        continuous = torch.expm1(continuous)
-    
-    return continuous
+        self.num_cells, self.num_genes = expression.shape
+        self.num_bins = num_bins
+        self.gene_names = gene_names
+        self.control_pert_name = control_pert_name
 
+        # Handle perturbation labels
+        if isinstance(pert_labels, (list, np.ndarray)) and not isinstance(pert_labels[0], (int, np.integer)):
+            # String labels - need to encode
+            unique_perts = sorted(set(pert_labels))
+            self.pert_to_idx = {p: i for i, p in enumerate(unique_perts)}
+            self.idx_to_pert = {i: p for p, i in self.pert_to_idx.items()}
+            pert_indices = [self.pert_to_idx[p] for p in pert_labels]
+            self.pert_labels = torch.tensor(pert_indices, dtype=torch.long)
+        else:
+            # Already indices
+            if not isinstance(pert_labels, Tensor):
+                pert_labels = torch.from_numpy(pert_labels).long()
+            self.pert_labels = pert_labels
+            self.pert_to_idx = None
+            self.idx_to_pert = None
 
-def normalize_expression(
-    expression: Union[Tensor, Array],
-    method: str = "log1p",
-) -> Tensor:
-    """Normalize expression values.
-    
-    Args:
-        expression: Raw expression values
-        method: Normalization method ('log1p', 'zscore', 'minmax')
-    
-    Returns:
-        Normalized expression tensor
-    """
-    if isinstance(expression, np.ndarray):
-        expression = torch.from_numpy(expression).float()
-    else:
-        expression = expression.float()
-    
-    if method == "log1p":
-        return torch.log1p(expression)
-    elif method == "zscore":
-        mean = expression.mean(dim=0, keepdim=True)
-        std = expression.std(dim=0, keepdim=True) + 1e-8
-        return (expression - mean) / std
-    elif method == "minmax":
-        min_val = expression.min(dim=0, keepdim=True)[0]
-        max_val = expression.max(dim=0, keepdim=True)[0]
-        return (expression - min_val) / (max_val - min_val + 1e-8)
-    else:
-        return expression
+        self.num_perturbations = len(torch.unique(self.pert_labels))
 
+        # Handle control expression
+        if control_expression is not None:
+            if not isinstance(control_expression, Tensor):
+                control_expression = torch.from_numpy(control_expression).long()
+            self.control_expression = control_expression
+            self.has_separate_controls = True
+        else:
+            # Extract control cells from the main expression matrix
+            if self.pert_to_idx is not None:
+                control_idx = self.pert_to_idx.get(control_pert_name)
+            else:
+                control_idx = 0  # Assume 0 is control
 
-def create_synthetic_rnaseq(
-    num_cells: int = 1000,
-    num_genes: int = 2000,
-    num_bins: int = 100,
-    sparsity: float = 0.7,
-    seed: Optional[int] = None,
-) -> Tuple[Tensor, List[str]]:
-    """Create synthetic RNA-seq data for testing.
-    
-    Args:
-        num_cells: Number of cells to generate
-        num_genes: Number of genes
-        num_bins: Number of expression bins
-        sparsity: Fraction of zero values
-        seed: Random seed
-    
-    Returns:
-        Tuple of (expression tensor, gene names list)
-    """
-    if seed is not None:
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-    
-    # Generate expression with specified sparsity
-    expression = torch.randint(0, num_bins, (num_cells, num_genes))
-    
-    # Apply sparsity mask
-    mask = torch.rand(num_cells, num_genes) < sparsity
-    expression[mask] = 0
-    
-    # Generate gene names
-    gene_names = [f"Gene_{i}" for i in range(num_genes)]
-    
-    return expression, gene_names
+            control_mask = (self.pert_labels == control_idx)
+            self.control_expression = expression[control_mask]
+            self.has_separate_controls = False
+
+            # Remove control cells from main dataset
+            perturbed_mask = ~control_mask
+            self.expression = expression[perturbed_mask]
+            self.pert_labels = self.pert_labels[perturbed_mask]
+            self.num_cells = self.expression.shape[0]
+
+        if len(self.control_expression) == 0:
+            warnings.warn(
+                f"No control cells found with label '{control_pert_name}'. "
+                "Using random sampling from all cells."
+            )
+            self.control_expression = expression
+
+        print(f"PerturbSeqDataset: {self.num_cells} perturbed cells, "
+              f"{len(self.control_expression)} control cells, "
+              f"{self.num_perturbations} perturbations")
+
+    def __len__(self) -> int:
+        return self.num_cells
+
+    def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor, Tensor]:
+        """
+        Get a training sample.
+
+        Returns:
+            control: Random control cell expression [num_genes]
+            pert_label: Perturbation label [scalar]
+            perturbed: Perturbed cell expression [num_genes]
+        """
+        # Get perturbed cell and its label
+        perturbed = self.expression[idx]
+        pert_label = self.pert_labels[idx]
+
+        # Sample a random control cell
+        control_idx = torch.randint(0, len(self.control_expression), (1,)).item()
+        control = self.control_expression[control_idx]
+
+        return control, pert_label, perturbed
+
+    def get_dataloader(
+        self,
+        batch_size: int = 32,
+        shuffle: bool = True,
+        num_workers: int = 0,
+        **kwargs
+    ) -> DataLoader:
+        """Create a DataLoader for this dataset."""
+        return DataLoader(
+            self,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            **kwargs
+        )
 

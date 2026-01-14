@@ -19,6 +19,7 @@ This library adapts discrete diffusion models for gene expression prediction:
 - **Gene Expression Imputation**: Fill in missing or dropout values
 - **Denoising**: Correct noisy measurements
 - **Generation**: Create synthetic single-cell expression profiles
+- **Perturbation Prediction**: Predict cellular responses to genetic/chemical perturbations
 
 ## Installation
 
@@ -198,6 +199,101 @@ sampler = EulerSampler(model, graph, noise, num_steps=100)
 x_init = graph.sample_limiting((batch_size, num_genes), device)
 generated = sampler.sample(x_init)
 ```
+
+## Perturbation Prediction
+
+This library now supports perturbation prediction, similar to the STATE model from Arc Institute. The model predicts cellular responses to genetic or chemical perturbations using discrete diffusion.
+
+### Task Formulation
+
+Given:
+- **Control cell**: Baseline/unperturbed cell expression
+- **Perturbation label**: Which gene/condition was perturbed
+
+Predict:
+- **Perturbed cell**: Gene expression after perturbation
+
+### Quick Start
+
+```python
+import torch
+from sedd import (
+    SEDDPerturbationTransformerSmall,
+    AbsorbingGraph,
+    LogLinearNoise,
+    PerturbationTrainer,
+    PerturbSeqDataset,
+)
+
+# 1. Load perturbation-seq data (AnnData format)
+import scanpy as sc
+adata = sc.read_h5ad("perturbseq_data.h5ad")
+
+# Expression matrix should be discretized
+expression = torch.from_numpy(adata.X).long()
+pert_labels = adata.obs["perturbation"].values  # Perturbation annotations
+
+# 2. Create dataset
+dataset = PerturbSeqDataset(
+    expression=expression,
+    pert_labels=pert_labels,
+    num_bins=100,
+    control_pert_name="control"  # Name of control condition
+)
+
+train_loader = dataset.get_dataloader(batch_size=32)
+
+# 3. Create model with perturbation conditioning
+model = SEDDPerturbationTransformerSmall(
+    num_genes=dataset.num_genes,
+    num_bins=dataset.num_bins,
+    num_perturbations=dataset.num_perturbations
+)
+
+graph = AbsorbingGraph(num_states=dataset.num_bins + 1)
+noise = LogLinearNoise()
+
+# 4. Train
+trainer = PerturbationTrainer(model, graph, noise)
+trainer.train(train_loader, num_epochs=50)
+```
+
+### Training Script
+
+Use the provided training script for perturbation prediction:
+
+```bash
+python scripts/train_perturbseq.py \
+    --config configs/perturbseq_small.yaml \
+    --data_path path/to/perturbseq.h5ad \
+    --pert_col perturbation \
+    --control_name control \
+    --batch_size 16 \
+    --num_epochs 100
+```
+
+### Data Format
+
+The dataset expects AnnData files with:
+- `X`: Expression matrix (cells × genes), already discretized into bins
+- `obs[pert_col]`: Column containing perturbation labels (e.g., "control", "GeneA_knockout", "DrugB")
+- Control cells should be labeled with a specific control name (default: "control")
+
+### Model Architecture
+
+The perturbation model extends the base SEDD transformer with:
+- **Perturbation embedding**: Learns representations for each perturbation type
+- **Conditioning**: Combines time and perturbation embeddings for adaptive layer norm
+- **Training objective**: Predicts perturbed cell from masked perturbed cell + perturbation label
+
+### References
+
+This implementation is inspired by:
+- **STATE** (Arc Institute): Virtual cell model for perturbation prediction
+  - [Paper](https://www.biorxiv.org/content/10.1101/2025.06.26.661135v1)
+  - [Code](https://github.com/ArcInstitute/state)
+- **SEDD**: Score-Entropy Discrete Diffusion (ICML 2024 Best Paper)
+  - [Code](https://github.com/louaaron/Score-Entropy-Discrete-Diffusion)
 
 ## Citation
 
