@@ -210,3 +210,5 @@ requirements.txt
 setup.py
 
 checkpoints/
+
+slurm_out/

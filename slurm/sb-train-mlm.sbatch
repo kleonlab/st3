@@ -1,15 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=SEDD-Train
-#SBATCH --account=gts-agarg35
+#SBATCH --account=brics.b5cc
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-node=rtx_6000:1
-#SBATCH --mem-per-gpu=80G
-#SBATCH --time=48:00:00
-#SBATCH --qos=embers
+#SBATCH --gpus-per-node=1
+#SBATCH --mem-per-gpu=64G
+#SBATCH --time=4:00:00
+#SBATCH --qos=normal
 #SBATCH --output=slurm_out/sedd_train-%A.out
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=amete7@gatech.edu
 
 # SLURM batch script for training SEDD RNA-seq model using YAML config
 #
@@ -20,10 +19,13 @@
 #   CONFIG=configs/rnaseq_large.yaml sbatch slurm/sb-train-mlm.sbatch
 
 # Change to project directory
-cd /storage/project/r-agark35-0/amete7/vla/st3 || exit 1
+cd /home/b5cc/sanjukta.b5cc/st3 || exit 1
 
 # Create slurm output directory if it doesn't exist
 mkdir -p slurm_out
+
+# Load CUDA module
+module load cuda/12.6 2>/dev/null || module load cuda 2>/dev/null || echo "Warning: Could not load CUDA module"
 
 # Activate virtual environment (adjust path as needed)
 if [ -f ".venv/bin/activate" ]; then
@@ -36,6 +38,13 @@ fi
 
 # Set CUDA device
 export CUDA_VISIBLE_DEVICES=0
+
+# Memory optimization for large sequences
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+# Check CUDA availability
+echo "CUDA check:"
+python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA devices: {torch.cuda.device_count()}')" 2>/dev/null || echo "Could not check CUDA"
 
 # Print job information
 echo "=========================================="
