@@ -1,0 +1,10 @@
+# Cell Load Configuration for HepG2 Perturbation Data
+
+# Dataset paths - maps dataset names to their DIRECTORIES
+# cell-load expects h5ad files named {cell_type}.h5ad inside each directory
+[datasets]
+hepg2_data = "/home/b5cc/sanjukta.b5cc/st3/datasets/cellload_hepg2"
+
+# Training datasets - maps dataset names to "train" to use entire dataset for training
+[training]
+hepg2_data = "train"
