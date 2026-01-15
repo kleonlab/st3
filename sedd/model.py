@@ -401,7 +401,7 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         num_heads: int = 8,
         ff_mult: float = 4.0,
         dropout: float = 0.1,
-        max_seq_len: int = 4096,
+        max_seq_len: int = 8565,
     ):
         """
         Args:
@@ -465,7 +465,11 @@ class SEDDPerturbationTransformer(SEDDTransformer):
             sigma = sigma.expand(batch_size)
 
         # Token and position embeddings
+
+    
         tok_emb = self.token_embed(x)
+
+
         pos_idx = torch.arange(seq_len, device=device)
         pos_emb = self.gene_embed(pos_idx).unsqueeze(0)
         h = tok_emb + pos_emb
