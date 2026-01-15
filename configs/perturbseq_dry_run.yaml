@@ -1,0 +1,58 @@
+# Configuration for SEDD Perturbation Prediction - Dry Run
+# This config uses minimal model size for quick testing/debugging
+# Task: control cell + perturbation label -> perturbed cell
+
+# Model architecture - VERY SMALL for dry run
+model:
+  name: SEDDPerturbationTransformerSmall
+  hidden_dim: 8      # Minimal hidden dimension
+  num_layers: 2      # Minimal layers
+  num_heads: 2       # Minimal heads
+  dropout: 0.1
+
+# Data parameters
+data:
+  # IMPORTANT: Update this path to your actual data file
+  data_path: /home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad
+  pert_col: gene              # Column in adata.obs with perturbation labels
+  control_name: non-targeting # Name of control perturbation
+  val_fraction: 0.1
+
+# Training hyperparameters - Reduced for dry run
+training:
+  batch_size: 32     # Larger batch for faster testing
+  num_epochs: 2      # Only 2 epochs for dry run
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  mask_ratio: 0.15
+  gradient_clip: 1.0
+  optimizer:
+    type: AdamW
+    betas: [0.9, 0.999]
+
+# Checkpoint and logging
+checkpointing:
+  checkpoint_dir: experiments/perturbseq_dry_run
+  save_interval: 1   # Save every epoch for dry run
+  resume: null       # Path to checkpoint to resume from
+
+logging:
+  log_interval: 5    # Log frequently for dry run
+  val_interval: 1    # Validate every epoch
+
+# Inference parameters
+inference:
+  batch_size: 64
+  num_batches: 2     # Only process 2 batches for dry run
+  num_cells_visualize: 3
+
+# Other parameters
+other:
+  seed: 42
+  num_workers: 0     # 0 workers for dry run to avoid multiprocessing issues
+
+# Diffusion-specific parameters
+diffusion:
+  noise_schedule: LogLinearNoise
+  noise_eps: 1.0e-3
+  graph_type: AbsorbingGraph
