@@ -3,7 +3,7 @@
 # Dataset paths - maps dataset names to their DIRECTORIES
 # cell-load expects h5ad files named {cell_type}.h5ad inside each directory
 [datasets]
-hepg2_data = "/home/b5cc/sanjukta.b5cc/st3/datasets/cellload_hepg2"
+hepg2_data = "/home/b5cc/sanjukta.b5cc/st3/datasets/k562_5k_with_celltype.h5ad"
 
 # Training datasets - maps dataset names to "train" to use entire dataset for training
 [training]
