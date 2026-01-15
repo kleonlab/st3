@@ -247,7 +247,7 @@ def main():
         )
 
     # Get perturbation labels
-    pert_labels = adata.obs[args.pert_col].values
+    pert_labels = adata.obs[args.pert_col].astype(str).to_numpy()
     print(f"Found {len(np.unique(pert_labels))} unique perturbations")
     print(f"Perturbation distribution:")
     unique, counts = np.unique(pert_labels, return_counts=True)
@@ -256,14 +256,19 @@ def main():
     if len(unique) > 10:
         print(f"  ... and {len(unique) - 10} more")
 
-    # Convert expression to tensor
+    # Get gene names
+    gene_names = adata.var_names.tolist()
+    print(f"Gene names extracted: {len(gene_names)} genes")
+
+    # Convert expression to numpy array
     expression = adata.X
     if hasattr(expression, 'toarray'):
         expression = expression.toarray()
-    expression = torch.from_numpy(expression).long()
+    else:
+        expression = np.asarray(expression)
 
     # Calculate vocab size from data
-    NUM_BINS = int(expression.max().item())
+    NUM_BINS = int(expression.max())
     NUM_GENES = expression.shape[1]
     VOCAB_SIZE = NUM_BINS + 1  # +1 for mask token
 
@@ -271,12 +276,13 @@ def main():
     print(f"Number of genes: {NUM_GENES}")
     print(f"Number of bins: {NUM_BINS}")
     print(f"Vocabulary size: {VOCAB_SIZE}")
-    print(f"Sparsity: {(expression == 0).sum().item() / expression.numel():.2%}")
+    print(f"Sparsity: {(expression == 0).sum() / expression.size:.2%}")
 
     # Create dataset
     dataset = PerturbSeqDataset(
         expression=expression,
         pert_labels=pert_labels,
+        gene_names=gene_names,
         num_bins=NUM_BINS,
         control_pert_name=args.control_name,
     )
