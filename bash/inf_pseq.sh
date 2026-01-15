@@ -11,7 +11,7 @@
 
 # Default config file (can be overridden by command line or environment)
 CONFIG="${CONFIG:-configs/perturbseq_dry_run.yaml}"
-EXPERIMENT_DIR="${EXPERIMENT_DIR:-experiments/perturbseq_dry_run}"
+EXPERIMENT_DIR="${EXPERIMENT_DIR:-experiments/pseq_demo}"
 DATA_PATH="${DATA_PATH:-}"
 CHECKPOINT="${CHECKPOINT:-}"
 OUTPUT_DIR="${OUTPUT_DIR:-inference_results}"

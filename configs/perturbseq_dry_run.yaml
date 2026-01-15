@@ -20,7 +20,7 @@ data:
 
 # Training hyperparameters - Reduced for dry run
 training:
-  batch_size: 32     # Larger batch for faster testing
+  batch_size: 1     # Larger batch for faster testing
   num_epochs: 2      # Only 2 epochs for dry run
   learning_rate: 1.0e-4
   weight_decay: 0.01
@@ -32,7 +32,7 @@ training:
 
 # Checkpoint and logging
 checkpointing:
-  checkpoint_dir: experiments/perturbseq_dry_run
+  checkpoint_dir: experiments/pseq_demo
   save_interval: 1   # Save every epoch for dry run
   resume: null       # Path to checkpoint to resume from
 
@@ -42,7 +42,7 @@ logging:
 
 # Inference parameters
 inference:
-  batch_size: 64
+  batch_size: 1
   num_batches: 2     # Only process 2 batches for dry run
   num_cells_visualize: 3
 

@@ -21,7 +21,8 @@ classifiers = [
 ]
 dependencies = [
     "torch>=1.12.0",
-    "numpy>=1.21.0,<2.4",
+    "numpy>=1.21.0,<2",  # Must stay <2 for scanpy/pyarrow/sklearn compatibility
+    "pyarrow==14.0.2",   # Pinned for numpy 1.x compatibility
     "tqdm>=4.60.0",
     "matplotlib>=3.4.0",
     "matplotlib-inline>=0.1.6",

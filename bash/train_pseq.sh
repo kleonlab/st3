@@ -9,6 +9,29 @@
 #   CONFIG=configs/perturbseq_dry_run.yaml ./bash/train_pseq.sh
 #
 
+# Load CUDA module (for HPC systems)
+module load cuda/12.6 2>/dev/null || module load cuda 2>/dev/null || echo "Warning: Could not load CUDA module"
+
+# Set CUDA device
+mkdir -p slurm_out
+
+# Load CUDA module
+module load cuda/12.6 2>/dev/null || module load cuda 2>/dev/null || echo "Warning: Could not load CUDA module"
+
+# Activate virtual environment if not already active
+if [ -z "$VIRTUAL_ENV" ]; then
+    if [ -f ".venv/bin/activate" ]; then
+        source .venv/bin/activate
+    elif [ -f "venv/bin/activate" ]; then
+        source venv/bin/activate
+    fi
+fi
+
+# Check CUDA availability
+echo "CUDA check:"
+python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA devices: {torch.cuda.device_count()}')" 2>/dev/null || echo "Could not check CUDA"
+echo ""
+
 # Default config file (can be overridden by command line or environment)
 CONFIG="${CONFIG:-configs/perturbseq_dry_run.yaml}"
 DATA_PATH="${DATA_PATH:-}"

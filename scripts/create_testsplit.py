@@ -1,6 +1,3 @@
-
-
-
 import scanpy as sc
 
 adata_path = "/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad"

@@ -20,12 +20,12 @@ python scripts/train_rnaseq.py \
     --config "$CONFIG" \
     --data_path "$DATA_PATH" \
     --checkpoint_dir "experiments/quick_test" \
-    --num_epochs 5 \
-    --batch_size 16 \
-    --hidden_dim 64 \
+    --num_epochs 3 \
+    --batch_size 1 \
+    --hidden_dim 16 \
     --num_layers 2 \
     --num_heads 2 \
-    --log_interval 10 \
+    --log_interval 1 \
     --val_interval 1
 
 echo ""
