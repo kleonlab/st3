@@ -29,7 +29,7 @@ from sedd.graph import AbsorbingGraph
 from sedd.noise import LogLinearNoise
 from sedd.trainer import PerturbationTrainer
 from sedd.data import PerturbSeqDataset, train_val_split
-from sedd.sampling import EulerSampler
+from sedd.sampling import PerturbationEulerSampler
 
 import yaml
 
@@ -352,8 +352,8 @@ def main():
 
     num_batches = args.num_batches or len(test_loader)
 
-    # Create sampler
-    sampler = EulerSampler(
+    # Create sampler with perturbation conditioning
+    sampler = PerturbationEulerSampler(
         model=model,
         graph=graph,
         noise=noise,
@@ -372,13 +372,20 @@ def main():
             pert_label = pert_label.to(device)
             target = target.to(device)
 
+            # Note: control cells are loaded but not currently used for conditioning.
+            # Future enhancement: could incorporate control cell state into the generation process.
+
             # Initialize with fully masked sequence
             batch_size = control.size(0)
             mask_idx = graph.mask_index
             x_init = torch.full_like(target, mask_idx)
 
-            # Sample from the model
-            predicted = sampler.sample(x_init, show_progress=False)
+            # Sample from the model WITH perturbation conditioning
+            predicted = sampler.sample(
+                x_init,
+                pert_labels=pert_label,
+                show_progress=False
+            )
 
             # Collect results
             all_predictions.append(predicted.cpu())
