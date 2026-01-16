@@ -134,7 +134,11 @@ class PerturbSeqDataset(Dataset):
         self.gene_names = gene_names
         self.control_pert_name = control_pert_name
 
-        # Handle perturbation labels
+        # Handle perturbation labels - convert pandas Categorical to strings if needed
+        if hasattr(pert_labels, 'dtype') and 'category' in str(pert_labels.dtype):
+            # Numpy array with categorical dtype - convert to strings
+            pert_labels = pert_labels.astype(str)
+        
         if isinstance(pert_labels, (list, np.ndarray)) and not isinstance(pert_labels[0], (int, np.integer)):
             # String labels - need to encode
             unique_perts = sorted(set(pert_labels))
@@ -162,18 +166,34 @@ class PerturbSeqDataset(Dataset):
             # Extract control cells from the main expression matrix
             if self.pert_to_idx is not None:
                 control_idx = self.pert_to_idx.get(control_pert_name)
+                print(f"DEBUG: Looking for control '{control_pert_name}', got index: {control_idx}")
+                print(f"DEBUG: Available perturbations: {list(self.pert_to_idx.keys())[:10]}")
             else:
                 control_idx = 0  # Assume 0 is control
 
-            control_mask = (self.pert_labels == control_idx)
-            self.control_expression = expression[control_mask]
-            self.has_separate_controls = False
+            if control_idx is None:
+                # Control name not found - use all data as perturbed, sample from all for controls
+                print(f"WARNING: Control '{control_pert_name}' not found. Using all data as perturbed cells.")
+                self.control_expression = expression
+                self.has_separate_controls = False
+                # Keep all data as perturbed
+                self.expression = expression
+                self.pert_labels = self.pert_labels
+                self.num_cells = self.expression.shape[0]
+            else:
+                control_mask = (self.pert_labels == control_idx)
+                num_controls = control_mask.sum().item()
+                print(f"DEBUG: Found {num_controls} control cells out of {len(self.pert_labels)} total")
+                
+                self.control_expression = expression[control_mask]
+                self.has_separate_controls = False
 
-            # Remove control cells from main dataset
-            perturbed_mask = ~control_mask
-            self.expression = expression[perturbed_mask]
-            self.pert_labels = self.pert_labels[perturbed_mask]
-            self.num_cells = self.expression.shape[0]
+                # Remove control cells from main dataset
+                perturbed_mask = ~control_mask
+                self.expression = expression[perturbed_mask]
+                self.pert_labels = self.pert_labels[perturbed_mask]
+                self.num_cells = self.expression.shape[0]
+                print(f"DEBUG: After filtering, {self.num_cells} perturbed cells remaining")
 
         if len(self.control_expression) == 0:
             warnings.warn(
