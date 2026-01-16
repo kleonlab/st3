@@ -534,7 +534,7 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         is_masked = (x_noised == self.mask_index)
 
         if not is_masked.any():
-            return torch.tensor(0.0, device=x_perturbed.device)
+            return torch.tensor(0.0, device=x_perturbed.device, requires_grad = True)
 
         pred_at_mask = pred_score[is_masked]  # [num_masked, vocab_size]
         target_at_mask = x_perturbed[is_masked]  # [num_masked]
