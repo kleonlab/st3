@@ -69,9 +69,9 @@ def parse_args():
 
     # Data arguments
     parser.add_argument(
-        "--data_path",
+        "--train_data_path",
         type=str,
-        default=data_config.get("data_path", None),
+        default=data_config.get("train_data_path", None),
         help="Path to h5ad file containing perturbation-seq data"
     )
     parser.add_argument(
@@ -212,7 +212,7 @@ def main():
     args = parse_args()
 
     # Validate required arguments
-    if not args.data_path:
+    if not args.train_data_path:
         raise ValueError(
             "No data_path provided. Either set it in config or pass --data_path argument"
         )
@@ -235,8 +235,8 @@ def main():
         json.dump(vars(args), f, indent=2)
 
     # Load data
-    print(f"Loading perturbation-seq data from {args.data_path}")
-    adata = sc.read_h5ad(args.data_path)
+    print(f"Loading perturbation-seq data from {args.train_data_path}")
+    adata = sc.read_h5ad(args.train_data_path)
     print(f"Loaded {len(adata)} cells with {adata.n_vars} genes")
 
     # Check for perturbation column
