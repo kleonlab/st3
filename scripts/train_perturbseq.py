@@ -230,9 +230,6 @@ def main():
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     # Save arguments
-    import json
-    with open(checkpoint_dir / "args.json", "w") as f:
-        json.dump(vars(args), f, indent=2)
 
     # Load data
     print(f"Loading perturbation-seq data from {args.train_data_path}")
@@ -272,7 +269,10 @@ def main():
     print(f"Number of bins: {NUM_BINS}")
     print(f"Vocabulary size: {VOCAB_SIZE}")
     print(f"Sparsity: {(expression == 0).sum().item() / expression.numel():.2%}")
-
+    
+    import json
+    with open(checkpoint_dir / "args.json", "w") as f:
+        json.dump(vars(args), f, indent=2)
     # Create dataset
     dataset = PerturbSeqDataset(
         expression=expression,

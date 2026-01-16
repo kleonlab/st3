@@ -129,9 +129,9 @@ def parse_args():
         help="Path to h5ad file containing test perturbation-seq data"
     )
     parser.add_argument(
-        "--pert_col",
+        "--gene",
         type=str,
-        default=data_config.get("pert_col", "perturbation"),
+        default=data_config.get("gene", "perturbation"),
         help="Column name in adata.obs containing perturbation labels"
     )
     parser.add_argument(
@@ -257,14 +257,14 @@ def main():
     print(f"Loaded {len(adata)} cells with {adata.n_vars} genes")
 
     # Check for perturbation column
-    if args.pert_col not in adata.obs.columns:
+    if args.gene not in adata.obs.columns:
         raise ValueError(
-            f"Perturbation column '{args.pert_col}' not found in adata.obs. "
+            f"Perturbation column '{args.gene}' not found in adata.obs. "
             f"Available columns: {list(adata.obs.columns)}"
         )
 
     # Get perturbation labels
-    pert_labels = adata.obs[args.pert_col].values
+    pert_labels = adata.obs[args.gene].values
     print(f"Found {len(np.unique(pert_labels))} unique perturbations in test data")
 
     # Convert expression to tensor
