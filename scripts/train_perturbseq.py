@@ -52,7 +52,6 @@ def parse_args():
     checkpoint_config = config.get("checkpointing", {})
     logging_config = config.get("logging", {})
     other_config = config.get("other", {})
-    config_loader_path = get_config_path(config_loader_path)
 
     parser.add_argument(
         "--train_data_path",
@@ -77,6 +76,13 @@ def parse_args():
         type=float,
         default=data_config.get("val_fraction", 0.1),
         help="Fraction of data to use for validation"
+    )
+
+    parser.add_argument(
+        "--loader_path",
+        type=str, 
+        default=data_config.get("loader_path",None),
+        help="this is the toml file for dataloader configs"
     )
 
     parser.add_argument(
@@ -218,9 +224,12 @@ def main():
         expression = expression.toarray()
     expression = torch.from_numpy(expression).long()
 
+    perturbations = adata.obs['gene'].unique()
+
     NUM_BINS = int(expression.max().item())
     NUM_GENES = expression.shape[1]
     VOCAB_SIZE = NUM_BINS + 1  # +1 for mask token
+    NUM_PERTURBATIONS = len(perturbations)
 
     print_values(NUM_GENES, NUM_BINS, VOCAB_SIZE)
     print(f"Sparsity: {(expression == 0).sum().item() / expression.numel():.2%}") 
@@ -231,9 +240,8 @@ def main():
     all_genes = adata.obs["gene"].unique()
     train_genes = [g for g in all_genes]
 
-    config_path = get_config_path(config_loader_path)
     dm = PerturbationDataModule(
-        toml_config_path=config_path,
+        toml_config_path=args.loader_path,
         embed_key= "X_hvg",
         num_workers=0,
         batch_size=1,
@@ -253,18 +261,9 @@ def main():
 
     print(type(train_loader))
 
-    NUM_PERTURBATIONS = dataset.num_perturbations
-
    
     print(f"Number of training batches: {len(train_loader)}")
 
-    for batch in train_loader:
-        print(type(batch))
-        print(batch[0])
-        print(batch[1])
-        print(batch[2])
-
-        break 
 
     print(type(train_loader))
 

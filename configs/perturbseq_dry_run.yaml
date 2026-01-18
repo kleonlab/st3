@@ -13,11 +13,12 @@ model:
 # Data parameters
 data:
   #train_data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/k562_5k.h5ad  # Training data path
-  train_data_path: /home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad
-  test_data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/k562_test.h5ad  # Testing/inference data path
+  train_data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_5k_train_split.h5ad
+ # test_data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/k562_test.h5ad  # Testing/inference data path
   gene: gene  # Column in adata.obs with perturbation labels
   control_name: non-targeting  # Name of control perturbation
   val_fraction: 0.1
+  loader_path: /home/b5cc/sanjukta.b5cc/st3/cell_load_config.toml
 
 # Training hyperparameters
 training:

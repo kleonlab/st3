@@ -401,8 +401,7 @@ class PerturbationTrainer:
         self.optimizer.zero_grad()
 
         # Unpack batch
-        control, pert_labels, perturbed = batch
-        control = control.to(self.device)
+        pert_labels, perturbed = batch
         pert_labels = pert_labels.to(self.device)
         perturbed = perturbed.to(self.device)
 

@@ -22,6 +22,7 @@ fi
 echo "=========================================="
 echo ""
 
+source .venv/bin/activate
 # Build command
 CMD="python scripts/train_perturbseq.py --config $CONFIG"
 

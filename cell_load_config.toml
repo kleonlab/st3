@@ -1,6 +1,6 @@
 
 [preprocesing]
-k562_pre = "/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad"
+k562_pre = "/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_5k_train_split.h5ad"
 
 # Dataset paths - maps dataset names to their DIRECTORIES
 # cell-load expects h5ad files named {cell_type}.h5ad inside each directory

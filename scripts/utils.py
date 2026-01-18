@@ -93,14 +93,14 @@ def prepare_dataset(h5ad_path):
     adata.obs["cell_type"] = "single_cell_type"
     adata.obs["cell_type"].value_counts()
 
-    adata.write("/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_train_split.h5ad")
+    adata.write("/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_5k_train_split.h5ad")
 
 
     print("all done, ready for dataloader from cell-load")
 
 
 def main():
-    prepare_dataset("/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_train_split.h5ad")
+    prepare_dataset("/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_5k_train_split.h5ad")
 
 
 

@@ -5,7 +5,7 @@ from typing import Tuple, Optional
 
 import os
 #adata = sc.read_h5ad("../datasets/competition_support_set/k562_gwps.h5")
-adata = sc.read_h5ad("/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562.h5ad")
+adata = sc.read_h5ad("/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad")
 perturbation_list = adata.obs['gene'].value_counts()      
 
 print(perturbation_list) 
@@ -74,14 +74,14 @@ def stratified_label_split(adata_path: str, seed: int = 42) -> Tuple[sc.AnnData,
     print(f"Non-targeting in Train: {len(train_control_idx)} cells")
     print(f"Total: Train={train_adata.n_obs} cells, Test={test_adata.n_obs} cells")
 
-    train_adata.write_h5ad("/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_train_split.h5ad")
-    test_adata.write_h5ad("/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_test_split.h5ad")
+    train_adata.write_h5ad("/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_5k_train_split.h5ad")
+    test_adata.write_h5ad("/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_5k_test_split.h5ad")
 
     return train_adata, test_adata
 
 
 # Example usage:
-train, test = stratified_label_split("/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562.h5ad")
+train, test = stratified_label_split("/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad")
 
 print(train.obs['gene'].value_counts())
 print(test.obs['gene'].value_counts())
