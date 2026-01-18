@@ -504,7 +504,6 @@ class SEDDPerturbationTransformer(SEDDTransformer):
 
     def get_loss(
         self,
-        x_control: Tensor,
         x_perturbed: Tensor,
         x_noised: Tensor,
         sigma: Tensor,

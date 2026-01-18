@@ -327,7 +327,6 @@ class PerturbationTrainer:
 
     def compute_loss(
         self,
-        control: Tensor,
         pert_labels: Tensor,
         perturbed: Tensor,
         mask_ratio: float = 0.15,
@@ -359,7 +358,6 @@ class PerturbationTrainer:
 
         # Model predicts perturbed from noised + perturbation label
         loss = self.model.get_loss(
-            x_control=control,
             x_perturbed=perturbed,
             x_noised=x_noised,
             sigma=sigma,
@@ -409,7 +407,7 @@ class PerturbationTrainer:
         perturbed = perturbed.to(self.device)
 
         # Compute loss
-        loss = self.compute_loss(control, pert_labels, perturbed, mask_ratio)
+        loss = self.compute_loss(pert_labels, perturbed, mask_ratio)
 
         # Backward pass
         loss.backward()
@@ -459,10 +457,9 @@ class PerturbationTrainer:
         checkpoint_dir: Optional[str] = None,
         callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
-        """Training loop."""
-        if checkpoint_dir:
-            checkpoint_dir = Path(checkpoint_dir)
-            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        checkpoint_dir = Path(checkpoint_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         for epoch in range(num_epochs):
             self.epoch = epoch
@@ -519,7 +516,6 @@ class PerturbationTrainer:
         return self.history
 
     def save_checkpoint(self, path: str):
-        """Save training checkpoint."""
         checkpoint = {
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
@@ -534,7 +530,6 @@ class PerturbationTrainer:
         torch.save(checkpoint, path)
 
     def load_checkpoint(self, path: str, load_optimizer: bool = True):
-        """Load training checkpoint."""
         checkpoint = torch.load(path, map_location=self.device)
 
         self.model.load_state_dict(checkpoint["model_state_dict"])

@@ -8,6 +8,9 @@ import torch
 import scanpy as sc
 import numpy as np
 from torch.utils.data import DataLoader
+from cell_load.data_modules import PerturbationDataModule
+import scanpy as sc
+import os
 import yaml
 
 import json
@@ -26,6 +29,8 @@ def load_yaml_config(config_path):
     with open(config_file, "r") as f:
         return yaml.safe_load(f)
 
+def get_config_path(config_loader_path):
+    return config_loader_path 
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -47,6 +52,7 @@ def parse_args():
     checkpoint_config = config.get("checkpointing", {})
     logging_config = config.get("logging", {})
     other_config = config.get("other", {})
+    config_loader_path = get_config_path(config_loader_path)
 
     parser.add_argument(
         "--train_data_path",
@@ -182,6 +188,12 @@ def parse_args():
 
     return parser.parse_args()
 
+def print_values(NUM_GENES, NUM_BINS, VOCAB_SIZE):
+    print(f"\nData statistics:")
+    print(f"Number of genes: {NUM_GENES}")
+    print(f"Number of bins: {NUM_BINS}")
+    print(f"Vocabulary size: {VOCAB_SIZE}")
+
 
 def main():
     args = parse_args()
@@ -200,10 +212,6 @@ def main():
     pert_labels = adata.obs[args.gene].values
 
     print(f"Found {len(np.unique(pert_labels))} unique perturbations")
-    print(f"Perturbation distribution:")
-    unique, counts = np.unique(pert_labels, return_counts=True)
-    for u, c in zip(unique[:10], counts[:10]):  # Show first 10
-        print(f"  {u}: {c} cells")
 
     expression = adata.X
     if hasattr(expression, 'toarray'):
@@ -214,54 +222,44 @@ def main():
     NUM_GENES = expression.shape[1]
     VOCAB_SIZE = NUM_BINS + 1  # +1 for mask token
 
-    print(f"\nData statistics:")
-    print(f"Number of genes: {NUM_GENES}")
-    print(f"Number of bins: {NUM_BINS}")
-    print(f"Vocabulary size: {VOCAB_SIZE}")
-    print(f"Sparsity: {(expression == 0).sum().item() / expression.numel():.2%}")
+    print_values(NUM_GENES, NUM_BINS, VOCAB_SIZE)
+    print(f"Sparsity: {(expression == 0).sum().item() / expression.numel():.2%}") 
     
     with open(checkpoint_dir / "args.json", "w") as f:
         json.dump(vars(args), f, indent=2)
     # Create dataset
-    dataset = PerturbSeqDataset(
-        expression=expression,
-        pert_labels=pert_labels,
-        num_bins=NUM_BINS,
-        control_pert_name=args.control_name,
+    all_genes = adata.obs["gene"].unique()
+    train_genes = [g for g in all_genes]
+
+    config_path = get_config_path(config_loader_path)
+    dm = PerturbationDataModule(
+        toml_config_path=config_path,
+        embed_key= "X_hvg",
+        num_workers=0,
+        batch_size=1,
+        pert_col="gene",
+        control_pert="non-targeting",
+        perturbations_to_use=train_genes,
+        batch_col = "gem_group",
+        cell_sentence_len = 1,
+        cell_type_key="cell_type" 
     )
+
+    dm.setup()
+    print(f'DataModule setup complete!')
+
+    train_loader = dm.train_dataloader()
+    val_loader = dm.val_dataloader()
+
+    print(type(train_loader))
 
     NUM_PERTURBATIONS = dataset.num_perturbations
 
-    # Split into train/val
-    train_dataset, val_dataset = train_val_split(
-        dataset,
-        val_fraction=args.val_fraction,
-        seed=args.seed
-    )
-    print(f"\nTrain size: {len(train_dataset)}, Val size: {len(val_dataset)}")
-
-    # Create data loaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=0,
-        pin_memory=True if device.type == 'cuda' else False
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=0,
-        pin_memory=True if device.type == 'cuda' else False
-    )
-
+   
     print(f"Number of training batches: {len(train_loader)}")
 
     for batch in train_loader:
         print(type(batch))
-        #print("Batch keys:", batch.keys())
-        #print()
         print(batch[0])
         print(batch[1])
         print(batch[2])
@@ -270,9 +268,7 @@ def main():
 
     print(type(train_loader))
 
-    print(f"Number of validation batches: {len(val_loader)}")
 
-    # Create model
     print("\nCreating perturbation prediction model...")
     model = SEDDPerturbationTransformerSmall(
         num_genes=NUM_GENES,
