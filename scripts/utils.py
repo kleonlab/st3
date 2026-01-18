@@ -4,8 +4,8 @@ import numpy as np
 import scanpy as sc 
 
 # Get the repository root (parent of scripts folder)
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ASSETS_DIR = os.path.join(REPO_ROOT, "assets")
+#REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+#ASSETS_DIR = os.path.join(REPO_ROOT, "assets")
 
 
 def plot_cellstate(cellstate, output_path=None, title="Cell State Expression"):
@@ -83,7 +83,26 @@ def calc_sparsity(cellstate):
 
 
 def prepare_dataset(h5ad_path):
-    file = sc.read(h5ad_path) 
+    adata = sc.read(h5ad_path)
+    print(adata.obs['gene'].unique())
+
+    sc.pp.highly_variable_genes(adata,n_top_genes=2000, subset=False, flavor="seurat_v3")
+    adata.obsm["X_hvg"] = adata[:, adata.var.highly_variable].X.copy()
+    print("x_hvg done")
+
+    adata.obs["cell_type"] = "single_cell_type"
+    adata.obs["cell_type"].value_counts()
+
+    adata.write("/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_train_split.h5ad")
 
 
     print("all done, ready for dataloader from cell-load")
+
+
+def main():
+    prepare_dataset("/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_train_split.h5ad")
+
+
+
+if __name__ == "__main__":
+    main()
