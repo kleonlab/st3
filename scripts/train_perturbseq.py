@@ -267,6 +267,31 @@ def main():
 
     print(type(train_loader))
 
+    # Infer num perturbations from the actual dataloader to avoid label/embedding mismatch
+    try:
+        first_batch = next(iter(train_loader))
+        if isinstance(first_batch, dict):
+            pert_emb = first_batch["pert_emb"]
+            if pert_emb.dim() == 2 and pert_emb.shape[1] > 1:
+                inferred_num_perts = int(pert_emb.shape[1])
+            else:
+                inferred_num_perts = int(pert_emb.squeeze(-1).max().item()) + 1
+        else:
+            # Legacy tuple format: (control, pert_labels, perturbed) or (pert_labels, perturbed)
+            if len(first_batch) == 3:
+                _, pert_labels, _ = first_batch
+            else:
+                pert_labels, _ = first_batch
+            inferred_num_perts = int(pert_labels.max().item()) + 1
+
+        if inferred_num_perts != NUM_PERTURBATIONS:
+            print(
+                f"Overriding NUM_PERTURBATIONS {NUM_PERTURBATIONS} -> "
+                f"{inferred_num_perts} based on dataloader."
+            )
+            NUM_PERTURBATIONS = inferred_num_perts
+    except Exception as exc:
+        print(f"WARNING: Could not infer num perturbations from dataloader: {exc}")
 
     print("\nCreating perturbation prediction model...")
     model = SEDDPerturbationTransformerSmall(

@@ -418,6 +418,8 @@ class PerturbationTrainer:
             pert_labels = pert_labels.to(self.device)
             perturbed = perturbed.to(self.device)
 
+        pert_labels = self._normalize_pert_labels(pert_labels)
+
         # Round and convert to long for discrete tokens
         perturbed = torch.round(perturbed).long()
 
@@ -437,6 +439,31 @@ class PerturbationTrainer:
         self.step += 1
 
         return loss.item()
+
+    def _normalize_pert_labels(self, pert_labels: Tensor) -> Tensor:
+        """Ensure perturbation labels are in [0, num_perturbations - 1]."""
+        pert_labels = pert_labels.long()
+        num_perturbations = self.model.num_perturbations
+
+        if pert_labels.numel() == 0:
+            return pert_labels
+
+        min_label = int(pert_labels.min().item())
+        max_label = int(pert_labels.max().item())
+
+        # Common case: labels are 1-based but embedding expects 0-based
+        if min_label == 1 and max_label == num_perturbations:
+            pert_labels = pert_labels - 1
+            return pert_labels
+
+        if min_label < 0 or max_label >= num_perturbations:
+            raise ValueError(
+                "Perturbation labels out of range for embedding. "
+                f"Expected [0, {num_perturbations - 1}], got [{min_label}, {max_label}]. "
+                "Ensure dataset labels are zero-based or match num_perturbations."
+            )
+
+        return pert_labels
 
     @torch.no_grad()
     def validate(
@@ -466,6 +493,8 @@ class PerturbationTrainer:
                 control, pert_labels, perturbed = batch
                 pert_labels = pert_labels.to(self.device)
                 perturbed = perturbed.to(self.device)
+
+            pert_labels = self._normalize_pert_labels(pert_labels)
 
             # Round and convert to long for discrete tokens
             perturbed = torch.round(perturbed).long()

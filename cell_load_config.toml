@@ -6,7 +6,7 @@ k562_pre = "/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_5k_train_split.h5
 # cell-load expects h5ad files named {cell_type}.h5ad inside each directory
 [datasets]
 #k562 = "/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad"
-k562 = "/home/b5cc/sanjukta.b5cc/st3/your_data_with_celltype.h5ad"
+k562 = "/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/k562_5k_train_split.h5ad"
 
 # Training datasets - maps dataset names to "train" to use entire dataset for training
 [training]
