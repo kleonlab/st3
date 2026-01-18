@@ -1,6 +1,7 @@
 import os
 import matplotlib.pyplot as plt
 import numpy as np
+import scanpy as sc 
 
 # Get the repository root (parent of scripts folder)
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -79,3 +80,10 @@ def calc_sparsity(cellstate):
 
     print(sparsity)
     #return (sparsity)
+
+
+def prepare_dataset(h5ad_path):
+    file = sc.read(h5ad_path) 
+
+
+    print("all done, ready for dataloader from cell-load")

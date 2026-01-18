@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""
-Training script for perturbation prediction using discrete diffusion.
-
-This script trains a SEDD model for predicting perturbed cell states from
-control cells and perturbation labels.
-
-Task: control cell + perturbation label -> perturbed cell
-"""
-
 import argparse
 import os
 from pathlib import Path
@@ -19,7 +10,8 @@ import numpy as np
 from torch.utils.data import DataLoader
 import yaml
 
-# Add parent directory to path
+import json
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sedd.model import SEDDPerturbationTransformerSmall
@@ -30,14 +22,7 @@ from sedd.data import PerturbSeqDataset, train_val_split
 
 
 def load_yaml_config(config_path):
-    """Load configuration from YAML file."""
-    if config_path is None:
-        return {}
-
     config_file = Path(config_path)
-    if not config_file.exists():
-        raise ValueError(f"Config file not found: {config_file}")
-
     with open(config_file, "r") as f:
         return yaml.safe_load(f)
 
@@ -47,7 +32,6 @@ def parse_args():
         description="Train SEDD for perturbation prediction"
     )
 
-    # Config file argument (parsed first)
     parser.add_argument(
         "--config",
         type=str,
@@ -55,10 +39,7 @@ def parse_args():
         help="Path to YAML config file (e.g., configs/perturbseq_small.yaml)"
     )
 
-    # Parse args once to get config file
     args, remaining = parser.parse_known_args()
-
-    # Load config file
     config = load_yaml_config(args.config)
     model_config = config.get("model", {})
     data_config = config.get("data", {})
@@ -67,7 +48,6 @@ def parse_args():
     logging_config = config.get("logging", {})
     other_config = config.get("other", {})
 
-    # Data arguments
     parser.add_argument(
         "--train_data_path",
         type=str,
@@ -93,7 +73,6 @@ def parse_args():
         help="Fraction of data to use for validation"
     )
 
-    # Model arguments
     parser.add_argument(
         "--hidden_dim",
         type=int,
@@ -119,7 +98,6 @@ def parse_args():
         help="Dropout rate"
     )
 
-    # Training arguments
     parser.add_argument(
         "--batch_size",
         type=int,
@@ -157,7 +135,6 @@ def parse_args():
         help="Gradient clipping value"
     )
 
-    # Checkpoint arguments
     parser.add_argument(
         "--checkpoint_dir",
         type=str,
@@ -177,7 +154,6 @@ def parse_args():
         help="Path to checkpoint to resume from"
     )
 
-    # Logging arguments
     parser.add_argument(
         "--log_interval",
         type=int,
@@ -191,7 +167,6 @@ def parse_args():
         help="Run validation every N epochs"
     )
 
-    # Other arguments
     parser.add_argument(
         "--seed",
         type=int,
@@ -211,55 +186,30 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # Validate required arguments
-    if not args.train_data_path:
-        raise ValueError(
-            "No data_path provided. Either set it in config or pass --data_path argument"
-        )
-
-    # Set random seed
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
-
-    # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    # Create checkpoint directory
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save arguments
-
-    # Load data
     print(f"Loading perturbation-seq data from {args.train_data_path}")
     adata = sc.read_h5ad(args.train_data_path)
     print(f"Loaded {len(adata)} cells with {adata.n_vars} genes")
-
-    # Check for perturbation column
-    if args.gene not in adata.obs.columns:
-        raise ValueError(
-            f"Perturbation column '{args.gene}' not found in adata.obs. "
-            f"Available columns: {list(adata.obs.columns)}"
-        )
-
-    # Get perturbation labels
     pert_labels = adata.obs[args.gene].values
+
     print(f"Found {len(np.unique(pert_labels))} unique perturbations")
     print(f"Perturbation distribution:")
     unique, counts = np.unique(pert_labels, return_counts=True)
     for u, c in zip(unique[:10], counts[:10]):  # Show first 10
         print(f"  {u}: {c} cells")
-    if len(unique) > 10:
-        print(f"  ... and {len(unique) - 10} more")
 
-    # Convert expression to tensor
     expression = adata.X
     if hasattr(expression, 'toarray'):
         expression = expression.toarray()
     expression = torch.from_numpy(expression).long()
 
-    # Calculate vocab size from data
     NUM_BINS = int(expression.max().item())
     NUM_GENES = expression.shape[1]
     VOCAB_SIZE = NUM_BINS + 1  # +1 for mask token
@@ -270,7 +220,6 @@ def main():
     print(f"Vocabulary size: {VOCAB_SIZE}")
     print(f"Sparsity: {(expression == 0).sum().item() / expression.numel():.2%}")
     
-    import json
     with open(checkpoint_dir / "args.json", "w") as f:
         json.dump(vars(args), f, indent=2)
     # Create dataset
@@ -296,18 +245,31 @@ def main():
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=args.num_workers,
+        num_workers=0,
         pin_memory=True if device.type == 'cuda' else False
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=args.num_workers,
+        num_workers=0,
         pin_memory=True if device.type == 'cuda' else False
     )
 
     print(f"Number of training batches: {len(train_loader)}")
+
+    for batch in train_loader:
+        print(type(batch))
+        #print("Batch keys:", batch.keys())
+        #print()
+        print(batch[0])
+        print(batch[1])
+        print(batch[2])
+
+        break 
+
+    print(type(train_loader))
+
     print(f"Number of validation batches: {len(val_loader)}")
 
     # Create model
@@ -354,8 +316,6 @@ def main():
         trainer.load_checkpoint(args.resume)
         print(f"Resumed from epoch {trainer.epoch + 1}")
 
-    # Train
-    print("\nStarting training...")
     history = trainer.train(
         train_loader=train_loader,
         val_loader=val_loader,

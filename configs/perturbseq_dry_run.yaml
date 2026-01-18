@@ -12,7 +12,8 @@ model:
 
 # Data parameters
 data:
-  train_data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/k562_train.h5ad  # Training data path
+  #train_data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/k562_5k.h5ad  # Training data path
+  train_data_path: /home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad
   test_data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/k562_test.h5ad  # Testing/inference data path
   gene: gene  # Column in adata.obs with perturbation labels
   control_name: non-targeting  # Name of control perturbation

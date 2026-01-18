@@ -212,3 +212,5 @@ setup.py
 checkpoints/
 
 slurm_out/
+
+your_data_with_celltype.h5ad

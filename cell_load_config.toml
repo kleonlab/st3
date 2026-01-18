@@ -1,10 +1,13 @@
-# Cell Load Configuration for HepG2 Perturbation Data
+
+[preprocesing]
+k562_pre = "/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad"
 
 # Dataset paths - maps dataset names to their DIRECTORIES
 # cell-load expects h5ad files named {cell_type}.h5ad inside each directory
 [datasets]
-hepg2_data = "/home/b5cc/sanjukta.b5cc/st3/datasets/cellload_hepg2"
+#k562 = "/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad"
+k562 = "/home/b5cc/sanjukta.b5cc/st3/your_data_with_celltype.h5ad"
 
 # Training datasets - maps dataset names to "train" to use entire dataset for training
 [training]
-hepg2_data = "train"
+k562 = "train"
