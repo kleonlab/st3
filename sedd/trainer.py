@@ -400,10 +400,26 @@ class PerturbationTrainer:
         self.model.train()
         self.optimizer.zero_grad()
 
-        # Unpack batch
-        pert_labels, perturbed = batch
-        pert_labels = pert_labels.to(self.device)
-        perturbed = perturbed.to(self.device)
+        # Unpack batch - handle cell-load dictionary format
+        if isinstance(batch, dict):
+            # Cell-load batch format
+            perturbed = batch['pert_cell_emb'].to(self.device)
+            pert_emb = batch['pert_emb'].to(self.device)
+
+            # Convert one-hot perturbation embeddings to indices
+            # If pert_emb is one-hot, use argmax to get indices
+            if pert_emb.dim() == 2 and pert_emb.shape[1] > 1:
+                pert_labels = pert_emb.argmax(dim=-1)
+            else:
+                pert_labels = pert_emb.squeeze(-1).long()
+        else:
+            # Legacy tuple format: (pert_labels, perturbed)
+            pert_labels, perturbed = batch
+            pert_labels = pert_labels.to(self.device)
+            perturbed = perturbed.to(self.device)
+
+        # Round and convert to long for discrete tokens
+        perturbed = torch.round(perturbed).long()
 
         # Compute loss
         loss = self.compute_loss(pert_labels, perturbed, mask_ratio)
@@ -434,12 +450,27 @@ class PerturbationTrainer:
         num_batches = 0
 
         for batch in val_loader:
-            control, pert_labels, perturbed = batch
-            control = control.to(self.device)
-            pert_labels = pert_labels.to(self.device)
-            perturbed = perturbed.to(self.device)
+            # Unpack batch - handle cell-load dictionary format
+            if isinstance(batch, dict):
+                # Cell-load batch format
+                perturbed = batch['pert_cell_emb'].to(self.device)
+                pert_emb = batch['pert_emb'].to(self.device)
 
-            loss = self.compute_loss(control, pert_labels, perturbed, mask_ratio)
+                # Convert one-hot perturbation embeddings to indices
+                if pert_emb.dim() == 2 and pert_emb.shape[1] > 1:
+                    pert_labels = pert_emb.argmax(dim=-1)
+                else:
+                    pert_labels = pert_emb.squeeze(-1).long()
+            else:
+                # Legacy tuple format: (control, pert_labels, perturbed)
+                control, pert_labels, perturbed = batch
+                pert_labels = pert_labels.to(self.device)
+                perturbed = perturbed.to(self.device)
+
+            # Round and convert to long for discrete tokens
+            perturbed = torch.round(perturbed).long()
+
+            loss = self.compute_loss(pert_labels, perturbed, mask_ratio)
             total_loss += loss.item()
             num_batches += 1
 
