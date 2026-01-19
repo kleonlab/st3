@@ -234,8 +234,18 @@ def main():
     print_values(NUM_GENES, NUM_BINS, VOCAB_SIZE)
     print(f"Sparsity: {(expression == 0).sum().item() / expression.numel():.2%}") 
     
+    # Persist derived dimensions for reliable inference
+    args_payload = dict(vars(args))
+    args_payload.update(
+        {
+            "num_genes": NUM_GENES,
+            "num_bins": NUM_BINS,
+            "num_perturbations": NUM_PERTURBATIONS,
+            "vocab_size": VOCAB_SIZE,
+        }
+    )
     with open(checkpoint_dir / "args.json", "w") as f:
-        json.dump(vars(args), f, indent=2)
+        json.dump(args_payload, f, indent=2)
     # Create dataset
     all_genes = adata.obs["gene"].unique()
     train_genes = [g for g in all_genes]

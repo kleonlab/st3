@@ -1,0 +1,823 @@
+#!/usr/bin/env python3
+"""
+Inference script for cell generation using trained SEDD discrete diffusion model.
+
+This script loads a trained model and generates new synthetic cells from scratch
+by starting from an all-masked state and sampling.
+"""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+
+import torch
+import numpy as np
+import scanpy as sc
+import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from sedd.model import SEDDTransformerSmall
+from sedd.graph import AbsorbingGraph
+from sedd.noise import LogLinearNoise
+from sedd.trainer import SEDDTrainer
+from sedd.data import train_val_split
+from sedd.sampling import EulerSampler
+
+# Import TOML library
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+#!/usr/bin/env python3
+"""
+Inference script for perturbation prediction using trained SEDD model.
+
+This script loads a trained perturbation prediction model and generates
+perturbed cell states from perturbation labels alone (starting from pure noise).
+
+Task: perturbation label -> predicted perturbed cell
+"""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+
+import torch
+import numpy as np
+import scanpy as sc
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from sedd.model import SEDDPerturbationTransformerSmall
+from sedd.graph import AbsorbingGraph
+from sedd.noise import LogLinearNoise
+from sedd.trainer import PerturbationTrainer
+from sedd.data import PerturbSeqDataset
+from sedd.sampling import PerturbationEulerSampler
+
+import yaml
+
+
+def load_perturbations_from_file(filepath):
+    """
+    Load perturbation labels from a text file.
+    
+    Format: one perturbation per line (simple format)
+    Empty lines are ignored
+    Lines starting with # are treated as comments (optional)
+    
+    Example file content:
+```
+    KRAS
+    TP53
+    EGFR
+    non-targeting
+```
+    """
+    filepath = Path(filepath)
+    if not filepath.exists():
+        raise ValueError(f"Perturbations file not found: {filepath}")
+    
+    perturbations = []
+    with open(filepath, 'r') as f:
+        for line_num, line in enumerate(f, 1):
+            # Strip whitespace
+            line = line.strip()
+            
+            # Skip empty lines
+            if not line:
+                continue
+            
+            # Skip comments (optional - lines starting with #)
+            if line.startswith('#'):
+                continue
+            
+            # Add the perturbation
+            perturbations.append(line)
+    
+    if not perturbations:
+        raise ValueError(f"No perturbations found in {filepath}")
+    
+    print(f"Loaded {len(perturbations)} perturbations from {filepath}")
+    return perturbations
+
+def load_yaml_config(config_path):
+    """Load configuration from YAML file."""
+    if config_path is None:
+        return {}
+
+    config_file = Path(config_path)
+    if not config_file.exists():
+        raise ValueError(f"Config file not found: {config_file}")
+
+    with open(config_file, "r") as f:
+        return yaml.safe_load(f)
+
+
+def find_checkpoint(experiment_dir):
+    """
+    Find the best or final checkpoint in an experiment directory.
+
+    Priority:
+    1. best.pt (best validation checkpoint)
+    2. final.pt (final checkpoint)
+    3. Most recent epoch checkpoint
+    """
+    experiment_dir = Path(experiment_dir)
+
+    if not experiment_dir.exists():
+        raise ValueError(f"Experiment directory not found: {experiment_dir}")
+
+    # Check for best checkpoint
+    best_ckpt = experiment_dir / "best.pt"
+    if best_ckpt.exists():
+        print(f"Found best checkpoint: {best_ckpt}")
+        return best_ckpt
+
+    # Check for final checkpoint
+    final_ckpt = experiment_dir / "final.pt"
+    if final_ckpt.exists():
+        print(f"Found final checkpoint: {final_ckpt}")
+        return final_ckpt
+
+    # Find most recent epoch checkpoint
+    checkpoints = list(experiment_dir.glob("epoch_*.pt"))
+    if checkpoints:
+        checkpoints.sort(key=lambda x: int(x.stem.split("_")[1]))
+        latest = checkpoints[-1]
+        print(f"Found latest epoch checkpoint: {latest}")
+        return latest
+
+    raise ValueError(f"No checkpoints found in {experiment_dir}")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Generate perturbed cells from perturbation labels using trained SEDD model"
+    )
+
+    # Config file argument (parsed first)
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML config file (e.g., configs/perturbseq_inference.yaml)"
+    )
+
+    # Parse args once to get config file
+    args, remaining = parser.parse_known_args()
+
+    # Load config file
+    config = load_yaml_config(args.config)
+    data_config = config.get("data", {})
+    inference_config = config.get("inference", {})
+    other_config = config.get("other", {})
+
+    # Experiment/checkpoint arguments
+    parser.add_argument(
+        "--experiment_dir",
+        type=str,
+        required=True,
+        help="Path to experiment directory containing trained model checkpoint"
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Specific checkpoint file (if not provided, will auto-find best/final)"
+    )
+
+    # PRIMARY INPUT: Text file with perturbation labels
+    parser.add_argument(
+        "--perturbations_file",
+        type=str,
+        default=inference_config.get("perturbations_file"),
+        help="Path to text file with one perturbation label per line"
+    )
+    
+    # Alternative inputs
+    parser.add_argument(
+        "--perturbations",
+        type=str,
+        nargs='+',
+        default=None,
+        help="List of perturbation labels to generate (e.g., 'KRAS' 'TP53' 'control')"
+    )
+    parser.add_argument(
+        "--test_data_path",
+        type=str,
+        default=data_config.get("test_data_path"),
+        help="Path to h5ad file with test data (for extracting perturbations or evaluation)"
+    )
+    
+    # Perturbation mapping source
+    parser.add_argument(
+        "--mapping_data_path",
+        type=str,
+        default=data_config.get("mapping_data_path", data_config.get("train_data_path")),
+        help="Path to h5ad file to extract perturbation-to-index mapping (usually training data)"
+    )
+    parser.add_argument(
+        "--gene",
+        type=str,
+        default=data_config.get("gene", "perturbation"),
+        help="Column name in adata.obs containing perturbation labels"
+    )
+    parser.add_argument(
+        "--control_name",
+        type=str,
+        default=data_config.get("control_name", "control"),
+        help="Name of control perturbation"
+    )
+    
+    # Generation parameters
+    parser.add_argument(
+        "--num_samples_per_pert",
+        type=int,
+        default=inference_config.get("num_samples_per_pert", 10),
+        help="Number of cells to generate per perturbation"
+    )
+
+    # Inference arguments
+    parser.add_argument(
+        "--num_steps",
+        type=int,
+        default=inference_config.get("num_steps", 50),
+        help="Number of sampling steps for prediction"
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=inference_config.get("temperature", 1.0),
+        help="Sampling temperature"
+    )
+
+    # Visualization
+    parser.add_argument(
+        "--num_cells_visualize",
+        type=int,
+        default=inference_config.get("num_cells_visualize", 5),
+        help="Number of individual cells to visualize"
+    )
+    
+    # Evaluation
+    parser.add_argument(
+        "--evaluate",
+        action="store_true",
+        help="Evaluate generated cells against test data (requires --test_data_path)"
+    )
+
+    # Other arguments
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=other_config.get("seed", 42),
+        help="Random seed"
+    )
+
+    return parser.parse_args()
+
+
+def load_perturbations_from_file(filepath):
+    """
+    Load perturbation labels from a text file.
+    
+    Format: one perturbation per line
+    Lines starting with # are comments
+    Empty lines are ignored
+    
+    Example file content:
+```
+    # My perturbations to test
+    KRAS
+    TP53
+    EGFR
+    control
+```
+    """
+    filepath = Path(filepath)
+    if not filepath.exists():
+        raise ValueError(f"Perturbations file not found: {filepath}")
+    
+    perturbations = []
+    with open(filepath, 'r') as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            
+            # Skip empty lines and comments
+            if not line or line.startswith('#'):
+                continue
+            
+            perturbations.append(line)
+    
+    if not perturbations:
+        raise ValueError(f"No perturbations found in {filepath}")
+    
+    print(f"Loaded {len(perturbations)} perturbations from {filepath}")
+    return perturbations
+
+
+def load_perturbation_labels(args, pert_to_idx):
+    """
+    Load perturbation labels from various sources.
+    
+    Priority:
+    1. Text file (--perturbations_file)
+    2. Command line list (--perturbations)
+    3. Test data (--test_data_path)
+    
+    Returns:
+        list of (pert_name, pert_idx) tuples
+    """
+    perturbations = []
+    source = None
+    
+    # Priority 1: Text file
+    if args.perturbations_file:
+        source = "file"
+        pert_names = load_perturbations_from_file(args.perturbations_file)
+        
+        for pert in pert_names:
+            if pert not in pert_to_idx:
+                print(f"Warning: Perturbation '{pert}' not found in mapping, skipping")
+                print(f"  Available perturbations: {sorted(pert_to_idx.keys())[:10]}...")
+                continue
+            perturbations.append((pert, pert_to_idx[pert]))
+    
+    # Priority 2: Command line list
+    elif args.perturbations:
+        source = "command_line"
+        for pert in args.perturbations:
+            if pert not in pert_to_idx:
+                print(f"Warning: Perturbation '{pert}' not found in mapping, skipping")
+                print(f"  Available perturbations: {sorted(pert_to_idx.keys())[:10]}...")
+                continue
+            perturbations.append((pert, pert_to_idx[pert]))
+    
+    # Priority 3: Test data (extract unique perturbations)
+    elif args.test_data_path:
+        source = "test_data"
+        print(f"Loading perturbations from test data: {args.test_data_path}")
+        adata = sc.read_h5ad(args.test_data_path)
+        unique_perts = adata.obs[args.gene].unique()
+        for pert in unique_perts:
+            if pert not in pert_to_idx:
+                print(f"Warning: Perturbation '{pert}' not found in mapping, skipping")
+                continue
+            perturbations.append((pert, pert_to_idx[pert]))
+    
+    else:
+        raise ValueError(
+            "Must provide one of: --perturbations_file, --perturbations, or --test_data_path"
+        )
+    
+    if not perturbations:
+        raise ValueError(f"No valid perturbations loaded from {source}")
+    
+    print(f"Loaded {len(perturbations)} perturbations from {source}")
+    return perturbations
+
+
+def load_perturbation_mapping(args):
+    """
+    Load perturbation-to-index mapping from data.
+    
+    This mapping should ideally be saved during training, but for now
+    we reconstruct it from the original data.
+    """
+    if not args.mapping_data_path:
+        raise ValueError(
+            "Need --mapping_data_path to extract perturbation mapping. "
+            "This should point to the same data used during training."
+        )
+    
+    print(f"\nLoading perturbation mapping from {args.mapping_data_path}")
+    adata = sc.read_h5ad(args.mapping_data_path)
+    
+    if args.gene not in adata.obs.columns:
+        raise ValueError(
+            f"Perturbation column '{args.gene}' not found in {args.mapping_data_path}. "
+            f"Available columns: {list(adata.obs.columns)}"
+        )
+    
+    pert_labels = adata.obs[args.gene].values
+    
+    # Create dataset to get mapping
+    expression = adata.X
+    if hasattr(expression, 'toarray'):
+        expression = expression.toarray()
+    expression = torch.from_numpy(expression).long()
+    
+    NUM_BINS = int(expression.max().item())
+    
+    dataset = PerturbSeqDataset(
+        expression=expression,
+        pert_labels=pert_labels,
+        num_bins=NUM_BINS,
+        control_pert_name=args.control_name,
+    )
+    
+    print(f"Found {dataset.num_perturbations} unique perturbations in mapping data")
+    print(f"Examples: {list(dataset.pert_to_idx.keys())[:10]}")
+    
+    return dataset.pert_to_idx, dataset.idx_to_pert
+
+
+def main():
+    args = parse_args()
+
+    # Set random seed
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+
+    # Setup device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    # Find checkpoint
+    experiment_dir = Path(args.experiment_dir)
+    if args.checkpoint:
+        checkpoint_path = Path(args.checkpoint)
+    else:
+        checkpoint_path = find_checkpoint(experiment_dir)
+
+    # Create output directory for results
+    output_dir = experiment_dir / "inference_results"
+    output_dir.mkdir(exist_ok=True)
+    print(f"Results will be saved to: {output_dir}")
+
+    # Load training configuration
+    args_file = experiment_dir / "args.json"
+    if not args_file.exists():
+        raise ValueError(f"Training config not found: {args_file}")
+
+    with open(args_file, "r") as f:
+        train_config = json.load(f)
+
+    print(f"\nLoaded training configuration from {args_file}")
+    print(f"Model: hidden_dim={train_config.get('hidden_dim')}, "
+          f"layers={train_config.get('num_layers')}, "
+          f"heads={train_config.get('num_heads')}")
+          
+    NUM_GENES = train_config.get('num_genes')
+    NUM_BINS = train_config.get('num_bins') 
+    NUM_PERTURBATIONS = train_config.get('num_perturbations')
+
+    # If not in config, load from mapping data
+    if NUM_GENES is None or NUM_BINS is None or NUM_PERTURBATIONS is None:
+        print("\nWarning: Missing model dimensions in training config, loading from data")
+        if not args.mapping_data_path:
+            raise ValueError("Need --mapping_data_path to infer model dimensions")
+        
+        print(f"Loading data to infer dimensions from {args.mapping_data_path}")
+        adata = sc.read_h5ad(args.mapping_data_path)
+        
+        # Infer NUM_GENES
+        if NUM_GENES is None:
+            NUM_GENES = adata.n_vars
+            print(f"Inferred NUM_GENES = {NUM_GENES}")
+        
+        # Infer NUM_BINS
+        if NUM_BINS is None:
+            expression = adata.X
+            if hasattr(expression, 'toarray'):
+                expression = expression.toarray()
+            NUM_BINS = int(expression.max())
+            print(f"Inferred NUM_BINS = {NUM_BINS}")
+        
+        # Infer NUM_PERTURBATIONS
+        if NUM_PERTURBATIONS is None:
+            pert_labels = adata.obs[args.gene].values
+            expression_temp = adata.X
+            if hasattr(expression_temp, 'toarray'):
+                expression_temp = expression_temp.toarray()
+            expression_temp = torch.from_numpy(expression_temp).long()
+            
+            temp_dataset = PerturbSeqDataset(
+                expression=expression_temp,
+                pert_labels=pert_labels,
+                num_bins=NUM_BINS,
+                control_pert_name=args.control_name,
+            )
+            NUM_PERTURBATIONS = temp_dataset.num_perturbations
+            print(f"Inferred NUM_PERTURBATIONS = {NUM_PERTURBATIONS}")
+
+    # Prefer checkpoint shapes when available to avoid mismatch
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        state_dict = checkpoint.get("model_state_dict", {})
+        if "token_embed.weight" in state_dict:
+            ckpt_vocab_size = state_dict["token_embed.weight"].shape[0]
+            if NUM_BINS is None or (NUM_BINS + 1) != ckpt_vocab_size:
+                NUM_BINS = ckpt_vocab_size - 1
+                print(f"Overriding NUM_BINS from checkpoint: {NUM_BINS}")
+        if "pert_embed.weight" in state_dict:
+            ckpt_num_perts = state_dict["pert_embed.weight"].shape[0]
+            if NUM_PERTURBATIONS is None or NUM_PERTURBATIONS != ckpt_num_perts:
+                NUM_PERTURBATIONS = ckpt_num_perts
+                print(f"Overriding NUM_PERTURBATIONS from checkpoint: {NUM_PERTURBATIONS}")
+        if "gene_embed.weight" in state_dict:
+            ckpt_num_genes = state_dict["gene_embed.weight"].shape[0]
+            if NUM_GENES is None or NUM_GENES != ckpt_num_genes:
+                NUM_GENES = ckpt_num_genes
+                print(f"Overriding NUM_GENES from checkpoint: {NUM_GENES}")
+    except Exception as exc:
+        print(f"WARNING: Could not infer dimensions from checkpoint: {exc}")
+
+    VOCAB_SIZE = NUM_BINS + 1
+
+    print(f"\nModel configuration:")
+    print(f"Number of genes: {NUM_GENES}")
+    print(f"Number of bins: {NUM_BINS}")
+    print(f"Vocabulary size: {VOCAB_SIZE}")
+    print(f"Number of perturbations: {NUM_PERTURBATIONS}")
+    # Load perturbation mapping
+    pert_to_idx, idx_to_pert = load_perturbation_mapping(args)
+
+    # Load perturbations to generate
+    if args.perturbations_file or args.perturbations or args.test_data_path:
+        perturbations = load_perturbation_labels(args, pert_to_idx)
+    else:
+        # Default to all perturbations in mapping
+        perturbations = [(p, pert_to_idx[p]) for p in sorted(pert_to_idx.keys())]
+        print(f"Loaded {len(perturbations)} perturbations from mapping")
+
+    
+    print(f"\nWill generate cells for {len(perturbations)} perturbations:")
+    for pert_name, pert_idx in perturbations:
+        print(f"  - {pert_name} (index: {pert_idx})")
+
+    # Create model
+    print("\nCreating perturbation prediction model...")
+    model = SEDDPerturbationTransformerSmall(
+        num_genes=NUM_GENES,
+        num_bins=NUM_BINS,
+        num_perturbations=NUM_PERTURBATIONS,
+        hidden_dim=train_config.get("hidden_dim", 128),
+        num_layers=train_config.get("num_layers", 4),
+        num_heads=train_config.get("num_heads", 4),
+        dropout=train_config.get("dropout", 0.1),
+        max_seq_len=NUM_GENES
+    ).to(device)
+
+    num_params = sum(p.numel() for p in model.parameters())
+    print(f"Model parameters: {num_params:,}")
+
+    # Create graph and noise schedule
+    graph = AbsorbingGraph(num_states=VOCAB_SIZE)
+    noise = LogLinearNoise(eps=1e-3)
+
+    # Create trainer and load checkpoint
+    trainer = PerturbationTrainer(
+        model=model,
+        graph=graph,
+        noise=noise,
+        device=device
+    )
+
+    print(f"\nLoading checkpoint from {checkpoint_path}")
+    trainer.load_checkpoint(checkpoint_path, load_optimizer=False)
+    print(f"Model loaded! Trained for {trainer.epoch + 1} epochs.")
+
+    # Run generation
+    print(f"\nGenerating {args.num_samples_per_pert} samples per perturbation")
+    print(f"Sampling parameters: num_steps={args.num_steps}, temperature={args.temperature}")
+
+    model.eval()
+
+    # Create sampler
+    sampler = PerturbationEulerSampler(
+        model=model,
+        graph=graph,
+        noise=noise,
+        num_steps=args.num_steps,
+        temperature=args.temperature,
+        device=device
+    )
+
+    # Storage for generated cells
+    all_generated = []
+    all_pert_indices = []
+    all_pert_names = []
+
+    with torch.no_grad():
+        for pert_name, pert_idx in tqdm(perturbations, desc="Generating"):
+            for sample_idx in range(args.num_samples_per_pert):
+                # Create fully masked initial state
+                x_init = torch.full(
+                    (1, NUM_GENES),
+                    fill_value=graph.mask_index,
+                    dtype=torch.long,
+                    device=device
+                )
+                
+                # Create perturbation label
+                pert_label = torch.tensor([pert_idx], dtype=torch.long, device=device)
+                
+                # Generate cell
+                generated = sampler.sample(
+                    x_init,
+                    pert_labels=pert_label,
+                    show_progress=False
+                )
+                
+                # Store results
+                all_generated.append(generated.cpu())
+                all_pert_indices.append(pert_idx)
+                all_pert_names.append(pert_name)
+
+    # Concatenate results
+    all_generated = torch.cat(all_generated, dim=0)  # [num_total_samples, num_genes]
+    
+    print(f"\nGenerated {len(all_generated)} cells total")
+
+    # Save generated cells
+    print(f"\nSaving generated cells to {output_dir}")
+    
+    # Save as numpy arrays
+    np.save(output_dir / "generated_cells.npy", all_generated.numpy())
+    np.save(output_dir / "perturbation_indices.npy", np.array(all_pert_indices))
+    
+    # Save perturbation names
+    with open(output_dir / "perturbation_names.txt", 'w') as f:
+        for name in all_pert_names:
+            f.write(f"{name}\n")
+    
+    # Save metadata
+    metadata = {
+        "num_cells": len(all_generated),
+        "num_perturbations": len(perturbations),
+        "num_samples_per_pert": args.num_samples_per_pert,
+        "num_steps": args.num_steps,
+        "temperature": args.temperature,
+        "perturbations": [p[0] for p in perturbations],
+        "checkpoint": str(checkpoint_path),
+    }
+    with open(output_dir / "generation_metadata.json", 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    # Save as AnnData for easy analysis
+    adata_generated = sc.AnnData(
+        X=all_generated.numpy(),
+        obs={
+            'perturbation': all_pert_names,
+            'perturbation_idx': all_pert_indices,
+            'sample_idx': [i % args.num_samples_per_pert for i in range(len(all_generated))]
+        }
+    )
+    adata_generated.write_h5ad(output_dir / "generated_cells.h5ad")
+
+    # Generate summary statistics
+    print("\n" + "="*50)
+    print("Generation Summary")
+    print("="*50)
+    
+    for pert_name, pert_idx in perturbations:
+        mask = np.array(all_pert_indices) == pert_idx
+        cells = all_generated[mask]
+        
+        mean_expr = cells.float().mean().item()
+        std_expr = cells.float().std().item()
+        sparsity = (cells == 0).float().mean().item()
+        
+        print(f"{pert_name}:")
+        print(f"  Samples: {mask.sum()}")
+        print(f"  Mean expression: {mean_expr:.2f}")
+        print(f"  Std expression: {std_expr:.2f}")
+        print(f"  Sparsity: {sparsity:.2%}")
+
+    # Visualizations
+    print("\nGenerating visualizations...")
+    
+    # 1. Distribution of expression values
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    
+    axes[0].hist(all_generated.flatten().numpy(), bins=50, alpha=0.7)
+    axes[0].set_xlabel('Expression Bin')
+    axes[0].set_ylabel('Count')
+    axes[0].set_title('Distribution of Generated Expression Values')
+    
+    # Sparsity per perturbation
+    sparsities = []
+    labels = []
+    for pert_name, pert_idx in perturbations:
+        mask = np.array(all_pert_indices) == pert_idx
+        cells = all_generated[mask]
+        sparsity = (cells == 0).float().mean().item()
+        sparsities.append(sparsity)
+        labels.append(pert_name[:20])  # Truncate long names
+    
+    axes[1].barh(range(len(labels)), sparsities)
+    axes[1].set_yticks(range(len(labels)))
+    axes[1].set_yticklabels(labels, fontsize=8)
+    axes[1].set_xlabel('Sparsity (fraction of zeros)')
+    axes[1].set_title('Sparsity by Perturbation')
+    
+    plt.tight_layout()
+    fig.savefig(output_dir / "generation_summary.png", dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    # 2. Individual cell visualizations
+    num_viz = min(args.num_cells_visualize, len(all_generated))
+    viz_indices = np.random.choice(len(all_generated), num_viz, replace=False)
+    
+    for i, idx in enumerate(viz_indices):
+        cell = all_generated[idx].numpy()
+        pert_name = all_pert_names[idx]
+        
+        fig, ax = plt.subplots(figsize=(14, 4))
+        gene_indices = np.arange(len(cell))
+        ax.bar(gene_indices, cell, alpha=0.7, width=1.0)
+        ax.set_xlabel('Gene Index')
+        ax.set_ylabel('Expression Bin')
+        ax.set_title(f'Generated Cell - Perturbation: {pert_name}')
+        
+        plt.tight_layout()
+        fig.savefig(output_dir / f"generated_cell_{i}_{pert_name}.png", dpi=150, bbox_inches='tight')
+        plt.close()
+
+    # If test data provided and evaluation requested, compute metrics
+    if args.evaluate and args.test_data_path:
+        print("\n" + "="*50)
+        print("Evaluating against ground truth")
+        print("="*50)
+        
+        # Load test data
+        adata_test = sc.read_h5ad(args.test_data_path)
+        test_expr = adata_test.X
+        if hasattr(test_expr, 'toarray'):
+            test_expr = test_expr.toarray()
+        test_expr = torch.from_numpy(test_expr).long()
+        test_labels = adata_test.obs[args.gene].values
+        
+        # Compute per-perturbation metrics
+        eval_results = {}
+        for pert_name, pert_idx in perturbations:
+            # Get generated cells
+            gen_mask = np.array(all_pert_indices) == pert_idx
+            gen_cells = all_generated[gen_mask]
+            
+            # Get ground truth cells
+            test_mask = test_labels == pert_name
+            if test_mask.sum() == 0:
+                print(f"{pert_name}: No test samples")
+                continue
+                
+            true_cells = test_expr[test_mask]
+            
+            # Compute mean expression profiles
+            gen_mean = gen_cells.float().mean(dim=0)
+            true_mean = true_cells.float().mean(dim=0)
+            
+            # Correlation
+            correlation = np.corrcoef(gen_mean.numpy(), true_mean.numpy())[0, 1]
+            
+            # MAE
+            mae = (gen_mean - true_mean).abs().mean().item()
+            
+            # MSE
+            mse = ((gen_mean - true_mean) ** 2).mean().item()
+            
+            eval_results[pert_name] = {
+                "test_samples": int(test_mask.sum()),
+                "correlation": float(correlation),
+                "mae": float(mae),
+                "mse": float(mse),
+            }
+            
+            print(f"{pert_name}:")
+            print(f"  Test samples: {test_mask.sum()}")
+            print(f"  Correlation (mean profile): {correlation:.3f}")
+            print(f"  MAE (mean profile): {mae:.2f} bins")
+            print(f"  MSE (mean profile): {mse:.2f} bins²")
+        
+        # Save evaluation results
+        with open(output_dir / "evaluation_results.json", 'w') as f:
+            json.dump(eval_results, f, indent=2)
+
+    print("\n" + "="*50)
+    print(f"Generation complete! Results saved to {output_dir}")
+    print("="*50)
+    print(f"\nGenerated files:")
+    print(f"  - generated_cells.h5ad (AnnData format)")
+    print(f"  - generated_cells.npy (numpy array)")
+    print(f"  - perturbation_names.txt (list of perturbations)")
+    print(f"  - generation_metadata.json (generation parameters)")
+    print(f"  - generation_summary.png (visualizations)")
+    if args.evaluate and args.test_data_path:
+        print(f"  - evaluation_results.json (evaluation metrics)")
+
+
+if __name__ == "__main__":
+    main()
