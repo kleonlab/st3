@@ -30,7 +30,7 @@ test_labels = adata_test.obs['gene'].values
 print(len(test_expr))
 print(len(test_labels))
 
-print(test_expr[40])
+print(test_expr[20])
 print(test_labels[1])
 
 adata_pred = sc.read_h5ad(predicted_data_path)

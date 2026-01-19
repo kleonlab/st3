@@ -18,7 +18,7 @@ print(perturbation_list)
 perturbations = perturbation_list.index.tolist()
 
 # 2. Define the output path
-output_file = "/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/perturbation_trial.txt"
+output_file = "/home/b5cc/sanjukta.b5cc/st3/datasets/dataset/perturbation_names_all_5k.txt"
 
 # 3. Save to a text file (one perturbation per line)
 with open(output_file, "w") as f:
