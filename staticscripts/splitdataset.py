@@ -53,23 +53,44 @@ def stratified_label_split(adata_path: str, seed: int = 42) -> Tuple[sc.AnnData,
     test_gene_labels.extend(get_sample(low, 2, "Low"))
 
     # --- Part C: Final Assembly ---
-    # Test set: All cells of the 50 sampled genes + 1% of control cells
-    test_perturbed_idx = adata.obs_names[adata.obs['gene'].isin(test_gene_labels)]
-    
+    # Test set: HALF of the cells from the 50 sampled genes + 1% of control cells
+    # Train set: OTHER HALF of the cells from the 50 sampled genes + all other genes + 99% of control cells
+
+    test_perturbed_idx = []
+    train_perturbed_from_test_genes = []
+
+    # For each selected test gene, split its cells 50/50
+    for gene_label in test_gene_labels:
+        gene_cells = adata.obs_names[adata.obs['gene'] == gene_label]
+        n_cells = len(gene_cells)
+        n_test = max(1, n_cells // 2)  # At least 1 cell for test, half of total
+
+        np.random.seed(seed + hash(gene_label) % 1000)  # Deterministic but different per gene
+        test_cells = np.random.choice(gene_cells, size=n_test, replace=False)
+        train_cells = np.setdiff1d(gene_cells, test_cells)
+
+        test_perturbed_idx.extend(test_cells)
+        train_perturbed_from_test_genes.extend(train_cells)
+
+    test_perturbed_idx = np.array(test_perturbed_idx)
+    train_perturbed_from_test_genes = np.array(train_perturbed_from_test_genes)
+
     # Combine indices
     final_test_idx = np.concatenate([test_perturbed_idx, test_control_idx])
-    
-    # Train set: All cells of genes NOT in test list + 99% of control cells
-    # (Excluding the test_perturbed genes and the test_control cells)
-    train_perturbed_idx = np.setdiff1d(perturbed_indices, test_perturbed_idx)
-    final_train_idx = np.concatenate([train_perturbed_idx, train_control_idx])
+
+    # Train set: Half of test gene cells + all cells of genes NOT in test list + 99% of control cells
+    train_perturbed_other = np.setdiff1d(perturbed_indices,
+                                         np.concatenate([test_perturbed_idx, train_perturbed_from_test_genes]))
+    final_train_idx = np.concatenate([train_perturbed_from_test_genes, train_perturbed_other, train_control_idx])
 
     # Slice the AnnData
     test_adata = adata[final_test_idx].copy()
     train_adata = adata[final_train_idx].copy()
 
     print(f"--- Final Split Stats ---")
-    print(f"Test Genes sampled: {len(test_gene_labels)}")
+    print(f"Test Genes sampled: {len(test_gene_labels)} (50% of cells from each gene)")
+    print(f"  - {len(test_perturbed_idx)} perturbed cells in Test")
+    print(f"  - {len(train_perturbed_from_test_genes)} perturbed cells from test genes kept in Train")
     print(f"Non-targeting in Test: {len(test_control_idx)} cells")
     print(f"Non-targeting in Train: {len(train_control_idx)} cells")
     print(f"Total: Train={train_adata.n_obs} cells, Test={test_adata.n_obs} cells")
