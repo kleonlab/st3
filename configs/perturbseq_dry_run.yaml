@@ -44,7 +44,8 @@ logging:
 
 # Inference parameters
 inference:
-  perturbation_file: /home/b5cc/sanjukta.b5cc/st3/datasets/dataset/perturbation_names_5k.txt
+  perturbations_file: /home/b5cc/sanjukta.b5cc/st3/datasets/dataset/perturbation_names_5k.txt
+  perturbations_all_file: /home/b5cc/sanjukta.b5cc/st3/datasets/dataset/perturbation_name_all_5k.txt
   num_samples_per_pert: 10
   mask_ratio: 0.2
   num_steps: 5

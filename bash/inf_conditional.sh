@@ -99,4 +99,4 @@ echo ""
 echo "=========================================="
 echo "Perturbation prediction complete!"
 echo "Check ${EXPERIMENT_DIR}/inference_results for outputs"
-echo "=========================================="
+echo "==========================================
