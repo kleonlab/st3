@@ -33,9 +33,74 @@ def load_perturbations_from_file(filepath):
             if not line:
                 continue
             perturbations.append(line)
-    
+
     print(f"Loaded {len(perturbations)} perturbations from {filepath}")
     return perturbations
+
+def load_conditional_labels(pt_path, pert_names):
+    """Load conditional labels from .pt file and create lookup mapping.
+
+    Args:
+        pt_path: Path to .pt file containing {pert_name: label} mapping
+        pert_names: List of perturbation names in order (for index mapping)
+
+    Returns:
+        label_lookup: Tensor of shape [num_perturbations] mapping indices to labels
+        missing_perts: List of perturbations not found in .pt file
+    """
+    if pt_path is None:
+        return None, []
+
+    print(f"\nLoading conditional labels from: {pt_path}")
+    pt_data = torch.load(pt_path, map_location="cpu")
+
+    if not isinstance(pt_data, dict):
+        raise TypeError(f"Expected .pt file to contain a dictionary, got {type(pt_data)}")
+
+    pt_keys = set(pt_data.keys())
+    print(f"Loaded {len(pt_keys)} perturbations from .pt file")
+
+    # Check coverage
+    present = [p for p in pert_names if p in pt_keys]
+    missing = [p for p in pert_names if p not in pt_keys]
+
+    print(f"Total perturbations in dataset: {len(pert_names)}")
+    print(f"Present in .pt file: {len(present)}")
+    print(f"Missing from .pt file: {len(missing)}")
+
+    if missing:
+        print(f"WARNING: Missing perturbations (first 10): {missing[:10]}")
+
+    # Create lookup tensor: index -> conditional label
+    # Assumes pt_data values are either scalars or tensors
+    label_lookup = []
+    for pert_name in pert_names:
+        if pert_name in pt_data:
+            label_val = pt_data[pert_name]
+            # Handle different formats
+            if isinstance(label_val, torch.Tensor):
+                label_lookup.append(label_val.cpu())
+            else:
+                label_lookup.append(torch.tensor(label_val))
+        else:
+            # Use -1 for missing perturbations (will need to handle this)
+            label_lookup.append(torch.tensor(-1))
+
+    # Stack into tensor
+    if len(label_lookup) > 0:
+        # Check if labels are scalars or vectors
+        if label_lookup[0].dim() == 0:
+            # Scalar labels
+            label_lookup = torch.stack(label_lookup)
+        else:
+            # Vector labels (embeddings)
+            label_lookup = torch.stack(label_lookup)
+    else:
+        label_lookup = None
+
+    print(f"Created label lookup tensor of shape: {label_lookup.shape if label_lookup is not None else 'None'}")
+
+    return label_lookup, missing
 
 def load_yaml_config(config_path):
     """Load configuration from YAML file."""
@@ -152,6 +217,12 @@ def parse_args():
         type=str,
         default=data_config.get("mapping_data_path", data_config.get("train_data_path")),
         help="Path to h5ad file to extract perturbation-to-index mapping (usually training data)"
+    )
+    parser.add_argument(
+        "--cond_labels_pt_path",
+        type=str,
+        default=data_config.get("cond_labels_pt_path", None),
+        help="Path to .pt file containing conditional labels for perturbations"
     )
     parser.add_argument(
         "--gene",
@@ -353,6 +424,20 @@ def main():
     for pert_name, pert_idx in perturbations:
         print(f"  - {pert_name} (index: {pert_idx})")
 
+    # Load conditional labels from .pt file if provided
+    # Get all perturbation names from the master list for proper indexing
+    total_pert_names = load_perturbations_from_file(args.perturbations_all_file)
+    others = [p for p in total_pert_names if p != args.control_name]
+    ordered_pert_names = [args.control_name] + others
+
+    cond_label_lookup, missing_perts = load_conditional_labels(
+        args.cond_labels_pt_path,
+        ordered_pert_names
+    )
+
+    if cond_label_lookup is not None and len(missing_perts) > 0:
+        print(f"WARNING: {len(missing_perts)} perturbations missing from conditional labels file")
+
     # Create model
     print("\nCreating perturbation prediction model...")
     model = SEDDPerturbationTransformerSmall(
@@ -373,7 +458,13 @@ def main():
     graph = AbsorbingGraph(num_states=VOCAB_SIZE)
     noise = LogLinearNoise(eps=1e-3)
 
-    trainer = PerturbationTrainer(model=model,graph=graph,noise=noise,device=device)
+    trainer = PerturbationTrainer(
+        model=model,
+        graph=graph,
+        noise=noise,
+        device=device,
+        cond_label_lookup=cond_label_lookup
+    )
 
     print(f"\nLoading checkpoint from {checkpoint_path}")
     trainer.load_checkpoint(checkpoint_path, load_optimizer=False)
