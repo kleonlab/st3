@@ -30,7 +30,72 @@ def load_yaml_config(config_path):
         return yaml.safe_load(f)
 
 def get_config_path(config_loader_path):
-    return config_loader_path 
+    return config_loader_path
+
+def load_conditional_labels(pt_path, pert_names):
+    """Load conditional labels from .pt file and create lookup mapping.
+
+    Args:
+        pt_path: Path to .pt file containing {pert_name: label} mapping
+        pert_names: List of perturbation names in order (for index mapping)
+
+    Returns:
+        label_lookup: Tensor of shape [num_perturbations] mapping indices to labels
+        missing_perts: List of perturbations not found in .pt file
+    """
+    if pt_path is None:
+        return None, []
+
+    print(f"\nLoading conditional labels from: {pt_path}")
+    pt_data = torch.load(pt_path, map_location="cpu")
+
+    if not isinstance(pt_data, dict):
+        raise TypeError(f"Expected .pt file to contain a dictionary, got {type(pt_data)}")
+
+    pt_keys = set(pt_data.keys())
+    print(f"Loaded {len(pt_keys)} perturbations from .pt file")
+
+    # Check coverage
+    present = [p for p in pert_names if p in pt_keys]
+    missing = [p for p in pert_names if p not in pt_keys]
+
+    print(f"Total perturbations in dataset: {len(pert_names)}")
+    print(f"Present in .pt file: {len(present)}")
+    print(f"Missing from .pt file: {len(missing)}")
+
+    if missing:
+        print(f"WARNING: Missing perturbations (first 10): {missing[:10]}")
+
+    # Create lookup tensor: index -> conditional label
+    # Assumes pt_data values are either scalars or tensors
+    label_lookup = []
+    for pert_name in pert_names:
+        if pert_name in pt_data:
+            label_val = pt_data[pert_name]
+            # Handle different formats
+            if isinstance(label_val, torch.Tensor):
+                label_lookup.append(label_val.cpu())
+            else:
+                label_lookup.append(torch.tensor(label_val))
+        else:
+            # Use -1 for missing perturbations (will need to handle this)
+            label_lookup.append(torch.tensor(-1))
+
+    # Stack into tensor
+    if len(label_lookup) > 0:
+        # Check if labels are scalars or vectors
+        if label_lookup[0].dim() == 0:
+            # Scalar labels
+            label_lookup = torch.stack(label_lookup)
+        else:
+            # Vector labels (embeddings)
+            label_lookup = torch.stack(label_lookup)
+    else:
+        label_lookup = None
+
+    print(f"Created label lookup tensor of shape: {label_lookup.shape if label_lookup is not None else 'None'}")
+
+    return label_lookup, missing 
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -80,9 +145,15 @@ def parse_args():
 
     parser.add_argument(
         "--loader_path",
-        type=str, 
+        type=str,
         default=data_config.get("loader_path",None),
         help="this is the toml file for dataloader configs"
+    )
+    parser.add_argument(
+        "--cond_labels_pt_path",
+        type=str,
+        default=data_config.get("cond_labels_pt_path", None),
+        help="Path to .pt file containing conditional labels for perturbations"
     )
 
     parser.add_argument(
@@ -250,6 +321,15 @@ def main():
     all_genes = adata.obs["gene"].unique()
     train_genes = [g for g in all_genes]
 
+    # Load conditional labels from .pt file if provided
+    cond_label_lookup, missing_perts = load_conditional_labels(
+        args.cond_labels_pt_path,
+        train_genes
+    )
+
+    if cond_label_lookup is not None and len(missing_perts) > 0:
+        print(f"WARNING: {len(missing_perts)} perturbations missing from conditional labels file")
+
     dm = PerturbationDataModule(
         toml_config_path=args.loader_path,
         embed_key= "X_hvg",
@@ -337,7 +417,8 @@ def main():
         noise=noise,
         optimizer=optimizer,
         device=device,
-        gradient_clip=args.gradient_clip
+        gradient_clip=args.gradient_clip,
+        cond_label_lookup=cond_label_lookup
     )
 
     # Resume from checkpoint if specified

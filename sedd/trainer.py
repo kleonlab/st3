@@ -302,16 +302,23 @@ class PerturbationTrainer:
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         device: torch.device = None,
         gradient_clip: float = 1.0,
+        cond_label_lookup: Optional[Tensor] = None,
     ):
         self.model = model
         self.graph = graph
         self.noise = noise
         self.gradient_clip = gradient_clip
+        self.cond_label_lookup = cond_label_lookup
 
         self.device = device or torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         )
         self.model = self.model.to(self.device)
+
+        # Move cond_label_lookup to device if provided
+        if self.cond_label_lookup is not None:
+            self.cond_label_lookup = self.cond_label_lookup.to(self.device)
+            print(f"Using conditional label lookup with shape: {self.cond_label_lookup.shape}")
 
         self.optimizer = optimizer or torch.optim.AdamW(
             model.parameters(),
@@ -420,6 +427,13 @@ class PerturbationTrainer:
 
         pert_labels = self._normalize_pert_labels(pert_labels)
 
+        # Apply conditional label lookup if provided
+        pert_labels = self._apply_cond_label_lookup(pert_labels)
+
+        # Ensure labels are long type (handle both scalar and vector labels)
+        if pert_labels.dim() == 1:
+            pert_labels = pert_labels.long()
+
         # Round and convert to long for discrete tokens
         perturbed = torch.round(perturbed).long()
 
@@ -439,6 +453,29 @@ class PerturbationTrainer:
         self.step += 1
 
         return loss.item()
+
+    def _apply_cond_label_lookup(self, pert_labels: Tensor) -> Tensor:
+        """Replace perturbation labels with conditional labels from .pt file.
+
+        Args:
+            pert_labels: Original perturbation indices from dataloader [batch]
+
+        Returns:
+            Conditional labels from lookup table [batch] or [batch, emb_dim]
+        """
+        if self.cond_label_lookup is None:
+            return pert_labels
+
+        # Use the original indices to lookup conditional labels
+        # pert_labels are indices into the perturbation list, which we use to index cond_label_lookup
+        cond_labels = self.cond_label_lookup[pert_labels]
+
+        # Handle case where labels might be -1 (missing)
+        if (cond_labels == -1).any():
+            missing_count = (cond_labels == -1).sum().item()
+            print(f"WARNING: {missing_count} samples have missing conditional labels")
+
+        return cond_labels
 
     def _normalize_pert_labels(self, pert_labels: Tensor) -> Tensor:
         """Ensure perturbation labels are in [0, num_perturbations - 1]."""
@@ -495,6 +532,13 @@ class PerturbationTrainer:
                 perturbed = perturbed.to(self.device)
 
             pert_labels = self._normalize_pert_labels(pert_labels)
+
+            # Apply conditional label lookup if provided
+            pert_labels = self._apply_cond_label_lookup(pert_labels)
+
+            # Ensure labels are long type (handle both scalar and vector labels)
+            if pert_labels.dim() == 1:
+                pert_labels = pert_labels.long()
 
             # Round and convert to long for discrete tokens
             perturbed = torch.round(perturbed).long()
