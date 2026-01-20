@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
 #SBATCH --mem-per-gpu=64G
-#SBATCH --time=4:00:00
+#SBATCH --time=8:00:00
 #SBATCH --qos=normal
 #SBATCH --output=slurm_out/sedd_pseq_train-%A.out
 #SBATCH --mail-type=END,FAIL
@@ -60,7 +60,7 @@ echo "=========================================="
 echo ""
 
 # Default parameters (can be overridden by environment variables)
-CONFIG="${CONFIG:-configs/perturbseq_dry_run.yaml}"
+CONFIG="${CONFIG:-configs/perturbseq_small.yaml}"
 TRAIN_DATA_PATH="${TRAIN_DATA_PATH:-}"
 
 # Print training configuration

@@ -34,7 +34,7 @@ training:
 
 # Checkpoint and logging
 checkpointing:
-  checkpoint_dir: experiments/psed_demo/perturbseq_dry_run
+  checkpoint_dir: /home/b5cc/sanjukta.b5cc/st3/experiments/5k_psed
   save_interval: 1
   resume: null  # Path to checkpoint to resume from
 

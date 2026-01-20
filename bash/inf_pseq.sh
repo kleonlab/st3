@@ -11,8 +11,8 @@ echo "=========================================="
 echo ""
 
 # Defaults (override via environment variables or command line)
-CONFIG="${CONFIG:-configs/perturbseq_dry_run.yaml}"
-EXPERIMENT_DIR="${EXPERIMENT_DIR:-experiments/psed_demo/perturbseq_dry_run}"
+CONFIG="${CONFIG:-configs/perturbseq_small.yaml}"
+EXPERIMENT_DIR="${EXPERIMENT_DIR:-experiments/5k_psed}"
 TEST_DATA_PATH="${TEST_DATA_PATH:-}"
 
 echo "Config file    : ${CONFIG}"
