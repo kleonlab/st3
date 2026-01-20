@@ -105,7 +105,7 @@ def parse_args():
     parser.add_argument(
         "--config",
         type=str,
-        default=None,
+        default= "/home/b5cc/sanjukta.b5cc/st3/configs/perturbseq_small.yaml",
         help="Path to YAML config file (e.g., configs/perturbseq_small.yaml)"
     )
 

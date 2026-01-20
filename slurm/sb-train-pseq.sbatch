@@ -62,12 +62,16 @@ echo ""
 # Default parameters (can be overridden by environment variables)
 CONFIG="${CONFIG:-configs/perturbseq_small.yaml}"
 TRAIN_DATA_PATH="${TRAIN_DATA_PATH:-}"
+COND_LABELS_PT_PATH="${COND_LABELS_PT_PATH:-}"
 
 # Print training configuration
 echo "Training Configuration:"
 echo "Config file: $CONFIG"
 if [ -n "$TRAIN_DATA_PATH" ]; then
     echo "Data path: $TRAIN_DATA_PATH"
+fi
+if [ -n "$COND_LABELS_PT_PATH" ]; then
+    echo "Cond labels .pt: $COND_LABELS_PT_PATH"
 fi
 echo ""
 
@@ -82,7 +86,10 @@ CMD="python scripts/train_perturbseq.py --config $CONFIG"
 
 # Add data path if provided
 if [ -n "$TRAIN_DATA_PATH" ]; then
-    CMD="$CMD --data_path $TRAIN_DATA_PATH"
+    CMD="$CMD --train_data_path $TRAIN_DATA_PATH"
+fi
+if [ -n "$COND_LABELS_PT_PATH" ]; then
+    CMD="$CMD --cond_labels_pt_path $COND_LABELS_PT_PATH"
 fi
 
 # Add any additional command line arguments passed to sbatch

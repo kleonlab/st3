@@ -17,6 +17,7 @@ data:
   control_name: non-targeting # Name of control perturbation
   val_fraction: 0.1
   loader_path: /home/b5cc/sanjukta.b5cc/st3/examples/cell_load_config.toml
+  cond_labels_pt_path: /home/b5cc/sanjukta.b5cc/st3/datasets/5k/perturbation_mapping_5k.pt
 
 # Training hyperparameters
 training:

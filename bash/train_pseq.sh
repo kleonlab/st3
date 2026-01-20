@@ -8,6 +8,7 @@
 # Default config file (can be overridden by command line or environment)
 CONFIG="${CONFIG:-configs/perturbseq_small.yaml}"
 TRAIN_DATA_PATH="${TRAIN_DATA_PATH:-}"
+COND_LABELS_PT_PATH="${COND_LABELS_PT_PATH:-}"
 
 # Print configuration
 echo "=========================================="
@@ -19,6 +20,11 @@ if [ -n "$TRAIN_DATA_PATH" ]; then
 else
     echo "Train data path: (from config file)"
 fi
+if [ -n "$COND_LABELS_PT_PATH" ]; then
+    echo "Cond labels .pt: $COND_LABELS_PT_PATH"
+else
+    echo "Cond labels .pt: (from config file)"
+fi
 echo "=========================================="
 echo ""
 
@@ -28,7 +34,10 @@ CMD="python scripts/train_perturbseq.py --config $CONFIG"
 
 # Add train data path if provided (overrides config)
 if [ -n "$TRAIN_DATA_PATH" ]; then
-    CMD="$CMD --data_path $TRAIN_DATA_PATH"
+    CMD="$CMD --train_data_path $TRAIN_DATA_PATH"
+fi
+if [ -n "$COND_LABELS_PT_PATH" ]; then
+    CMD="$CMD --cond_labels_pt_path $COND_LABELS_PT_PATH"
 fi
 
 # Add any additional command line arguments
