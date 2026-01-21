@@ -470,10 +470,18 @@ class PerturbationTrainer:
         # pert_labels are indices into the perturbation list, which we use to index cond_label_lookup
         cond_labels = self.cond_label_lookup[pert_labels]
 
-        # Handle case where labels might be -1 (missing)
-        if (cond_labels == -1).any():
-            missing_count = (cond_labels == -1).sum().item()
-            print(f"WARNING: {missing_count} samples have missing conditional labels")
+        # For scalar labels, fall back to original labels when missing or out of range
+        if cond_labels.dim() == 1:
+            num_perturbations = self.model.num_perturbations
+            invalid = (cond_labels < 0) | (cond_labels >= num_perturbations)
+            if invalid.any():
+                invalid_count = invalid.sum().item()
+                print(
+                    f"WARNING: {invalid_count} conditional labels out of range; "
+                    "falling back to original perturbation indices for those samples."
+                )
+                cond_labels = cond_labels.clone()
+                cond_labels[invalid] = pert_labels[invalid]
 
         return cond_labels
 

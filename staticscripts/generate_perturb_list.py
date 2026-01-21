@@ -7,7 +7,7 @@ import os
 #adata = sc.read_h5ad("../datasets/competition_support_set/k562_gwps.h5")
 
 
-h5_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/5k/k562_5k_train_split.h5ad"
+h5_path = "/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad"
 adata = sc.read_h5ad(h5_path)
 
 perturbation_list = adata.obs['gene'].value_counts()      

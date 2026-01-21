@@ -93,7 +93,9 @@ def load_conditional_labels(pt_path, pert_names):
     else:
         label_lookup = None
 
-    print(f"Created label lookup tensor of shape: {label_lookup.shape if label_lookup is not None else 'None'}")
+    print(
+        f"Created label lookup tensor of shape: {label_lookup.shape if label_lookup is not None else 'None'}"
+    )
 
     return label_lookup, missing 
 
