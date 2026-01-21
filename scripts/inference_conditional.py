@@ -283,42 +283,31 @@ def parse_args():
 
     return parser.parse_args()
 
-def plot_single_cell():
-    num_viz = min(args.num_cells_visualize, len(all_generated))
-    viz_indices = np.random.choice(len(all_generated), num_viz, replace=False)
-    
-    for i, idx in enumerate(viz_indices):
-        cell = all_generated[idx].numpy()
-        pert_name = all_pert_names[idx]
-        
-        fig, ax = plt.subplots(figsize=(14, 4))
-        gene_indices = np.arange(len(cell))
-        ax.bar(gene_indices, cell, alpha=0.7, width=1.0)
-        ax.set_xlabel('Gene Index')
-        ax.set_ylabel('Expression Bin')
-        ax.set_title(f'Generated Cell - Perturbation: {pert_name}')
-        
-        plt.tight_layout()
-        fig.savefig(output_dir / f"generated_cell_{i}_{pert_name}.png", dpi=150, bbox_inches='tight')
-        plt.close()
-
 def load_perturbation_labels(args, control_name="non-targeting"):
     """
-    1. Loads the master list of all training perturbations.
+    1. Loads the master list of perturbations (from .pt mapping if provided).
     2. Assigns indices (Control=0, others=1, 2, 3...).
     3. Returns only the subset requested in args.perturbation_file.
     """
-    # Load the master list (all perturbations used during training)
-    # This list MUST be in the exact same order as used in training
-    total_pert_names = load_perturbations_from_file(args.perturbations_all_file)
-    
+    if args.cond_labels_pt_path:
+        pt_data = torch.load(args.cond_labels_pt_path, map_location="cpu")
+        if not isinstance(pt_data, dict):
+            raise TypeError(
+                f"Expected dict in {args.cond_labels_pt_path}, got {type(pt_data)}"
+            )
+        total_pert_names = list(pt_data.keys())
+    else:
+        # Load the master list (all perturbations used during training)
+        # This list MUST be in the exact same order as used in training
+        total_pert_names = load_perturbations_from_file(args.perturbations_all_file)
+
     # Load the specific subset you want to generate now
     target_pert_names = load_perturbations_from_file(args.perturbations_file)
 
     # 1 & 2. Recreate the mapping logic: Control is 0, others are +1
     # We remove the control from the loop to ensure it always gets index 0
     others = [p for p in total_pert_names if p != control_name]
-    
+
     full_mapping = {control_name: 0}
     for i, pert in enumerate(others):
         full_mapping[pert] = i + 1
@@ -330,7 +319,7 @@ def load_perturbation_labels(args, control_name="non-targeting"):
             # Packaging as (name, index) to match your generation loop
             perturbations.append((pert, full_mapping[pert]))
         else:
-            print(f"Warning: Requested perturbation '{pert}' was not found in the master training list.")
+            print(f"Warning: Requested perturbation '{pert}' was not found in the master list.")
 
     print(f"Loaded {len(perturbations)} perturbations for generation.")
     return perturbations

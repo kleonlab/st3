@@ -10,6 +10,19 @@ def load_perturbations(path: str) -> list[str]:
         return [line.strip() for line in f if line.strip()]
 
 
+def dedupe_preserve_order(items: list[str]) -> tuple[list[str], list[str]]:
+    seen = set()
+    unique = []
+    duplicates = [] 
+    for item in items:
+        if item in seen:
+            duplicates.append(item)
+            continue
+        seen.add(item)
+        unique.append(item)
+    return unique, duplicates
+
+
 def build_mapping(perturbations: list[str], control_name: str | None) -> dict[str, int]:
     if control_name and control_name in perturbations:
         others = [p for p in perturbations if p != control_name]
@@ -46,6 +59,11 @@ def main():
     perturbations = load_perturbations(args.perturbations_file)
     if not perturbations:
         raise ValueError(f"No perturbations found in {args.perturbations_file}")
+
+    perturbations, duplicates = dedupe_preserve_order(perturbations)
+    if duplicates:
+        print(f"WARNING: Found {len(duplicates)} duplicate names; deduplicated list.")
+        print("Duplicate examples:", duplicates[:5])
 
     mapping = build_mapping(perturbations, args.control_name)
 
