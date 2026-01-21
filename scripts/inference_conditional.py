@@ -38,18 +38,23 @@ def load_perturbations_from_file(filepath):
     return perturbations
 
 def load_conditional_labels(pt_path, pert_names):
-    """Load conditional labels from .pt file and create lookup mapping.
+    """Load conditional labels from .pt file and create name-based mapping.
+
+    This function now returns both the raw .pt dictionary and an index->name mapping,
+    allowing the trainer to look up embeddings by perturbation name regardless of
+    the ordering used during training vs inference.
 
     Args:
         pt_path: Path to .pt file containing {pert_name: label} mapping
         pert_names: List of perturbation names in order (for index mapping)
 
     Returns:
-        label_lookup: Tensor of shape [num_perturbations] mapping indices to labels
+        pt_data_dict: Dictionary {pert_name: embedding} from .pt file (or None)
+        idx_to_name: Dictionary {index: pert_name} for converting indices to names
         missing_perts: List of perturbations not found in .pt file
     """
     if pt_path is None:
-        return None, []
+        return None, None, []
 
     print(f"\nLoading conditional labels from: {pt_path}")
     pt_data = torch.load(pt_path, map_location="cpu")
@@ -71,36 +76,21 @@ def load_conditional_labels(pt_path, pert_names):
     if missing:
         print(f"WARNING: Missing perturbations (first 10): {missing[:10]}")
 
-    # Create lookup tensor: index -> conditional label
-    # Assumes pt_data values are either scalars or tensors
-    label_lookup = []
-    for pert_name in pert_names:
-        if pert_name in pt_data:
-            label_val = pt_data[pert_name]
-            # Handle different formats
-            if isinstance(label_val, torch.Tensor):
-                label_lookup.append(label_val.cpu())
-            else:
-                label_lookup.append(torch.tensor(label_val))
+    # Create index -> name mapping for the dataset
+    idx_to_name = {i: name for i, name in enumerate(pert_names)}
+
+    # Convert all embeddings to tensors for consistency
+    pt_data_processed = {}
+    for pert_name, label_val in pt_data.items():
+        if isinstance(label_val, torch.Tensor):
+            pt_data_processed[pert_name] = label_val.cpu()
         else:
-            # Use -1 for missing perturbations (will need to handle this)
-            label_lookup.append(torch.tensor(-1))
+            pt_data_processed[pert_name] = torch.tensor(label_val)
 
-    # Stack into tensor
-    if len(label_lookup) > 0:
-        # Check if labels are scalars or vectors
-        if label_lookup[0].dim() == 0:
-            # Scalar labels
-            label_lookup = torch.stack(label_lookup)
-        else:
-            # Vector labels (embeddings)
-            label_lookup = torch.stack(label_lookup)
-    else:
-        label_lookup = None
+    print(f"Created name-based lookup with {len(pt_data_processed)} perturbations")
+    print(f"Created index->name mapping with {len(idx_to_name)} entries")
 
-    print(f"Created label lookup tensor of shape: {label_lookup.shape if label_lookup is not None else 'None'}")
-
-    return label_lookup, missing
+    return pt_data_processed, idx_to_name, missing
 
 def load_yaml_config(config_path):
     """Load configuration from YAML file."""
@@ -419,12 +409,12 @@ def main():
     others = [p for p in total_pert_names if p != args.control_name]
     ordered_pert_names = [args.control_name] + others
 
-    cond_label_lookup, missing_perts = load_conditional_labels(
+    cond_labels_dict, idx_to_name, missing_perts = load_conditional_labels(
         args.cond_labels_pt_path,
         ordered_pert_names
     )
 
-    if cond_label_lookup is not None and len(missing_perts) > 0:
+    if cond_labels_dict is not None and len(missing_perts) > 0:
         print(f"WARNING: {len(missing_perts)} perturbations missing from conditional labels file")
 
     # Create model
@@ -452,7 +442,8 @@ def main():
         graph=graph,
         noise=noise,
         device=device,
-        cond_label_lookup=cond_label_lookup
+        cond_labels_dict=cond_labels_dict,
+        idx_to_name=idx_to_name
     )
 
     print(f"\nLoading checkpoint from {checkpoint_path}")

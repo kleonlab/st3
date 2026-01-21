@@ -302,23 +302,45 @@ class PerturbationTrainer:
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         device: torch.device = None,
         gradient_clip: float = 1.0,
-        cond_label_lookup: Optional[Tensor] = None,
+        cond_label_lookup: Optional[Tensor] = None,  # Legacy support
+        cond_labels_dict: Optional[Dict] = None,  # New name-based lookup
+        idx_to_name: Optional[Dict] = None,  # Index to name mapping
     ):
         self.model = model
         self.graph = graph
         self.noise = noise
         self.gradient_clip = gradient_clip
-        self.cond_label_lookup = cond_label_lookup
 
         self.device = device or torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         )
         self.model = self.model.to(self.device)
 
-        # Move cond_label_lookup to device if provided
-        if self.cond_label_lookup is not None:
-            self.cond_label_lookup = self.cond_label_lookup.to(self.device)
-            print(f"Using conditional label lookup with shape: {self.cond_label_lookup.shape}")
+        # Support both old index-based and new name-based lookup
+        if cond_labels_dict is not None and idx_to_name is not None:
+            # New name-based approach (preferred)
+            self.cond_labels_dict = cond_labels_dict
+            self.idx_to_name = idx_to_name
+            self.cond_label_lookup = None  # Not using index-based lookup
+
+            # Move embeddings to device
+            for key in self.cond_labels_dict:
+                if isinstance(self.cond_labels_dict[key], torch.Tensor):
+                    self.cond_labels_dict[key] = self.cond_labels_dict[key].to(self.device)
+
+            print(f"Using name-based conditional label lookup with {len(self.cond_labels_dict)} perturbations")
+            print(f"Index-to-name mapping contains {len(self.idx_to_name)} entries")
+        elif cond_label_lookup is not None:
+            # Legacy index-based approach
+            self.cond_label_lookup = cond_label_lookup.to(self.device)
+            self.cond_labels_dict = None
+            self.idx_to_name = None
+            print(f"Using legacy index-based conditional label lookup with shape: {self.cond_label_lookup.shape}")
+        else:
+            # No conditional labels
+            self.cond_label_lookup = None
+            self.cond_labels_dict = None
+            self.idx_to_name = None
 
         self.optimizer = optimizer or torch.optim.AdamW(
             model.parameters(),
@@ -457,33 +479,69 @@ class PerturbationTrainer:
     def _apply_cond_label_lookup(self, pert_labels: Tensor) -> Tensor:
         """Replace perturbation labels with conditional labels from .pt file.
 
+        Now uses name-based lookup to ensure correct embeddings regardless of ordering.
+
         Args:
             pert_labels: Original perturbation indices from dataloader [batch]
 
         Returns:
             Conditional labels from lookup table [batch] or [batch, emb_dim]
         """
-        if self.cond_label_lookup is None:
-            return pert_labels
+        # New name-based lookup approach
+        if self.cond_labels_dict is not None and self.idx_to_name is not None:
+            batch_size = pert_labels.shape[0]
+            cond_labels_list = []
 
-        # Use the original indices to lookup conditional labels
-        # pert_labels are indices into the perturbation list, which we use to index cond_label_lookup
-        cond_labels = self.cond_label_lookup[pert_labels]
+            for idx in pert_labels.cpu().numpy():
+                idx = int(idx)
+                # Convert index to perturbation name
+                if idx in self.idx_to_name:
+                    pert_name = self.idx_to_name[idx]
+                    # Look up embedding by name
+                    if pert_name in self.cond_labels_dict:
+                        cond_labels_list.append(self.cond_labels_dict[pert_name])
+                    else:
+                        # Perturbation not in .pt file, use original index
+                        cond_labels_list.append(torch.tensor(idx, device=self.device))
+                else:
+                    # Index not in mapping, use original index
+                    cond_labels_list.append(torch.tensor(idx, device=self.device))
 
-        # For scalar labels, fall back to original labels when missing or out of range
-        if cond_labels.dim() == 1:
-            num_perturbations = self.model.num_perturbations
-            invalid = (cond_labels < 0) | (cond_labels >= num_perturbations)
-            if invalid.any():
-                invalid_count = invalid.sum().item()
-                print(
-                    f"WARNING: {invalid_count} conditional labels out of range; "
-                    "falling back to original perturbation indices for those samples."
-                )
-                cond_labels = cond_labels.clone()
-                cond_labels[invalid] = pert_labels[invalid]
+            # Stack into tensor
+            if len(cond_labels_list) > 0:
+                if cond_labels_list[0].dim() == 0:
+                    # Scalar labels
+                    cond_labels = torch.stack(cond_labels_list).to(self.device)
+                else:
+                    # Vector labels (embeddings)
+                    cond_labels = torch.stack(cond_labels_list).to(self.device)
+            else:
+                cond_labels = pert_labels
 
-        return cond_labels
+            return cond_labels
+
+        # Legacy index-based lookup approach
+        if self.cond_label_lookup is not None:
+            # Use the original indices to lookup conditional labels
+            cond_labels = self.cond_label_lookup[pert_labels]
+
+            # For scalar labels, fall back to original labels when missing or out of range
+            if cond_labels.dim() == 1:
+                num_perturbations = self.model.num_perturbations
+                invalid = (cond_labels < 0) | (cond_labels >= num_perturbations)
+                if invalid.any():
+                    invalid_count = invalid.sum().item()
+                    print(
+                        f"WARNING: {invalid_count} conditional labels out of range; "
+                        "falling back to original perturbation indices for those samples."
+                    )
+                    cond_labels = cond_labels.clone()
+                    cond_labels[invalid] = pert_labels[invalid]
+
+            return cond_labels
+
+        # No conditional labels, return original
+        return pert_labels
 
     def _normalize_pert_labels(self, pert_labels: Tensor) -> Tensor:
         """Ensure perturbation labels are in [0, num_perturbations - 1]."""
