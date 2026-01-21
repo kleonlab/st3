@@ -84,19 +84,19 @@ def stratified_label_split(adata_path: str, seed: int = 42) -> Tuple[sc.AnnData,
     print(f"Total: Train={train_adata.n_obs} cells, Test={test_adata.n_obs} cells")
     print(f"Gene overlap (should be empty): {overlap}")
 
-    train_adata.write_h5ad("/home/b5cc/sanjukta.b5cc/st3/datasets/5k/k562_5k_train_split.h5ad")
-    test_adata.write_h5ad("/home/b5cc/sanjukta.b5cc/st3/datasets/5k/k562_5k_test_split.h5ad")
+    train_adata.write_h5ad("/home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_train_split.h5ad")
+    test_adata.write_h5ad("/home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_test_split.h5ad")
 
     return train_adata, test_adata
 
 
 # Example usage:
 if __name__ == "__main__":
-    adata = sc.read_h5ad("/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad")
+    adata = sc.read_h5ad("/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562.h5ad")
     perturbation_list = adata.obs['gene'].value_counts()      
     print(perturbation_list)
     
-    train, test = stratified_label_split("/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad")
+    train, test = stratified_label_split("/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562.h5ad")
     
     print("\n--- Train Gene Counts ---")
     print(train.obs['gene'].value_counts())

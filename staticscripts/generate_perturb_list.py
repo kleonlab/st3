@@ -7,7 +7,7 @@ import os
 #adata = sc.read_h5ad("../datasets/competition_support_set/k562_gwps.h5")
 
 
-h5_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/5k/k562_5k_train_split_processed.h5ad"
+h5_path = "/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562.h5ad"
 adata = sc.read_h5ad(h5_path)
 
 perturbation_list = adata.obs['gene'].value_counts()      
@@ -18,7 +18,7 @@ print(perturbation_list)
 perturbations = perturbation_list.index.tolist()
 
 # 2. Define the output path
-output_file = "/home/b5cc/sanjukta.b5cc/st3/datasets/5k/perturbation_names_train_5k.txt"
+output_file = "/home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names_all.txt"
 
 # 3. Save to a text file (one perturbation per line)
 with open(output_file, "w") as f:

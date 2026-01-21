@@ -39,13 +39,13 @@ def main():
     parser.add_argument(
         "--perturbations_file",
         type=str,
-        default="/home/b5cc/sanjukta.b5cc/st3/datasets/5k/perturbation_names_all_5k.txt",
+        default="/home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names_all.txt",
         help="Path to text file with one perturbation label per line",
     )
     parser.add_argument(
         "--output_path",
         type=str,
-        default="/home/b5cc/sanjukta.b5cc/st3/datasets/5k/perturbation_mapping_5k.pt",
+        default="/home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_mapping.pt",
         help="Output .pt path",
     )
     parser.add_argument(
