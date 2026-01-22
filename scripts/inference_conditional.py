@@ -378,6 +378,8 @@ def main():
 
 
     # Prefer checkpoint shapes when available to avoid mismatch
+    # Also detect if checkpoint uses precomputed embeddings
+    checkpoint_precomputed_dim = None
     try:
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
         state_dict = checkpoint.get("model_state_dict", {})
@@ -396,6 +398,10 @@ def main():
             if NUM_GENES is None or NUM_GENES != ckpt_num_genes:
                 NUM_GENES = ckpt_num_genes
                 print(f"Overriding NUM_GENES from checkpoint: {NUM_GENES}")
+        # Detect if checkpoint has precomputed projection layer
+        if "precomputed_proj.weight" in state_dict:
+            checkpoint_precomputed_dim = state_dict["precomputed_proj.weight"].shape[1]
+            print(f"Checkpoint was trained with precomputed embeddings (dim={checkpoint_precomputed_dim})")
     except Exception as exc:
         print(f"WARNING: Could not infer dimensions from checkpoint: {exc}")
 
@@ -427,11 +433,26 @@ def main():
     if cond_label_lookup is not None and len(missing_perts) > 0:
         print(f"WARNING: {len(missing_perts)} perturbations missing from conditional labels file")
 
-    # Infer precomputed embedding dimension from cond_label_lookup if provided
+    # Infer precomputed embedding dimension from checkpoint or cond_label_lookup
     precomputed_emb_dim = None
-    if cond_label_lookup is not None and cond_label_lookup.dim() == 2:
+
+    # First priority: Use dimension from checkpoint (ensures architecture match)
+    if checkpoint_precomputed_dim is not None:
+        precomputed_emb_dim = checkpoint_precomputed_dim
+        print(f"Using precomputed embedding dimension from checkpoint: {precomputed_emb_dim}")
+
+        # Validate against cond_label_lookup if both are present
+        if cond_label_lookup is not None and cond_label_lookup.dim() == 2:
+            label_dim = cond_label_lookup.shape[1]
+            if label_dim != checkpoint_precomputed_dim:
+                raise ValueError(
+                    f"Dimension mismatch: checkpoint expects {checkpoint_precomputed_dim} "
+                    f"but cond_label_lookup has {label_dim}"
+                )
+    # Second priority: Infer from cond_label_lookup if provided
+    elif cond_label_lookup is not None and cond_label_lookup.dim() == 2:
         precomputed_emb_dim = cond_label_lookup.shape[1]
-        print(f"Detected precomputed embedding dimension: {precomputed_emb_dim}")
+        print(f"Detected precomputed embedding dimension from labels: {precomputed_emb_dim}")
 
     # Create model
     print("\nCreating perturbation prediction model...")
