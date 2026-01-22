@@ -16,15 +16,24 @@ echo "Perturbation Prediction Inference - SEDD"
 echo "=========================================="
 echo ""
 
+# Check required parameters
+if [ -z "$EXPERIMENT_DIR" ]; then
+    echo "ERROR: EXPERIMENT_DIR is required"
+    echo "Usage: EXPERIMENT_DIR=path/to/experiment ./bash/inf_conditional.sh"
+    echo "   or: ./bash/inf_conditional.sh --experiment_dir path/to/experiment"
+    exit 1
+fi
+
 # Defaults (override via environment variables or command line)
+# Only CONFIG has a default - all other paths come from YAML config unless explicitly overridden
 CONFIG="${CONFIG:-/home/b5cc/sanjukta.b5cc/st3/configs/perturbseq_small.yaml}"
-EXPERIMENT_DIR="${EXPERIMENT_DIR:-/home/b5cc/sanjukta.b5cc/st3/experiments/5k_psed}"
-PERTURBATIONS_FILE="${PERTURBATIONS_FILE:-/home/b5cc/sanjukta.b5cc/st3/datasets/5k/perturbation_names_5k.txt}"
-MAPPING_DATA_PATH="${MAPPING_DATA_PATH:-/home/b5cc/sanjukta.b5cc/st3/datasets/5k/k562_5k_train_split_processed.h5ad}"
-TEST_DATA_PATH="${TEST_DATA_PATH:-/home/b5cc/sanjukta.b5cc/st3/datasets/5k/k562_5k_test_split.h5ad}"
-NUM_SAMPLES_PER_PERT="${NUM_SAMPLES_PER_PERT:-10}"
-NUM_STEPS="${NUM_STEPS:-50}"
-TEMPERATURE="${TEMPERATURE:-1.0}"
+EXPERIMENT_DIR="${EXPERIMENT_DIR}"  # No default - must be provided
+PERTURBATIONS_FILE="${PERTURBATIONS_FILE}"  # No default - use YAML config
+MAPPING_DATA_PATH="${MAPPING_DATA_PATH}"  # No default - use YAML config
+TEST_DATA_PATH="${TEST_DATA_PATH}"  # No default - use YAML config
+NUM_SAMPLES_PER_PERT="${NUM_SAMPLES_PER_PERT}"  # No default - use YAML config
+NUM_STEPS="${NUM_STEPS}"  # No default - use YAML config
+TEMPERATURE="${TEMPERATURE}"  # No default - use YAML config
 EVALUATE="${EVALUATE:-false}"
 
 echo "Config file           : ${CONFIG}"
@@ -59,7 +68,12 @@ echo "=========================================="
 echo ""
 
 # Build command
-CMD="python scripts/inference_conditional.py --config $CONFIG --experiment_dir $EXPERIMENT_DIR"
+CMD="python scripts/inference_conditional.py --config $CONFIG"
+
+# Add experiment_dir (required)
+if [ -n "$EXPERIMENT_DIR" ]; then
+    CMD="$CMD --experiment_dir $EXPERIMENT_DIR"
+fi
 
 # Add perturbations file if provided (overrides config)
 if [ -n "$PERTURBATIONS_FILE" ]; then
@@ -76,10 +90,16 @@ if [ -n "$TEST_DATA_PATH" ]; then
     CMD="$CMD --test_data_path $TEST_DATA_PATH"
 fi
 
-# Add generation parameters
-CMD="$CMD --num_samples_per_pert $NUM_SAMPLES_PER_PERT"
-CMD="$CMD --num_steps $NUM_STEPS"
-CMD="$CMD --temperature $TEMPERATURE"
+# Add generation parameters (only if explicitly provided, otherwise use config defaults)
+if [ -n "$NUM_SAMPLES_PER_PERT" ]; then
+    CMD="$CMD --num_samples_per_pert $NUM_SAMPLES_PER_PERT"
+fi
+if [ -n "$NUM_STEPS" ]; then
+    CMD="$CMD --num_steps $NUM_STEPS"
+fi
+if [ -n "$TEMPERATURE" ]; then
+    CMD="$CMD --temperature $TEMPERATURE"
+fi
 
 # Add evaluate flag if true
 if [ "$EVALUATE" = "true" ]; then
