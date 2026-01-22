@@ -385,6 +385,12 @@ def main():
     except Exception as exc:
         print(f"WARNING: Could not infer num perturbations from dataloader: {exc}")
 
+    # Infer precomputed embedding dimension from cond_label_lookup if provided
+    precomputed_emb_dim = None
+    if cond_label_lookup is not None and cond_label_lookup.dim() == 2:
+        precomputed_emb_dim = cond_label_lookup.shape[1]
+        print(f"Detected precomputed embedding dimension: {precomputed_emb_dim}")
+
     print("\nCreating perturbation prediction model...")
     model = SEDDPerturbationTransformerSmall(
         num_genes=NUM_GENES,
@@ -394,7 +400,8 @@ def main():
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         dropout=args.dropout,
-        max_seq_len=NUM_GENES
+        max_seq_len=NUM_GENES,
+        precomputed_emb_dim=precomputed_emb_dim
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())

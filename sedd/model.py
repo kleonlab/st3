@@ -402,6 +402,7 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         ff_mult: float = 4.0,
         dropout: float = 0.1,
         max_seq_len: int = 4096,
+        precomputed_emb_dim: int = None,
     ):
         """
         Args:
@@ -414,6 +415,7 @@ class SEDDPerturbationTransformer(SEDDTransformer):
             ff_mult: Feed-forward expansion factor
             dropout: Dropout rate
             max_seq_len: Maximum sequence length
+            precomputed_emb_dim: Dimension of pre-computed embeddings (e.g., 320 for ESM2), if using
         """
         super().__init__(
             num_genes=num_genes,
@@ -427,9 +429,17 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         )
 
         self.num_perturbations = num_perturbations
+        self.precomputed_emb_dim = precomputed_emb_dim
 
         # Perturbation embedding
         self.pert_embed = nn.Embedding(num_perturbations, hidden_dim)
+
+        # Pre-computed embedding projection (e.g., for protein embeddings)
+        # Projects from precomputed_emb_dim (e.g., 320) to hidden_dim
+        if precomputed_emb_dim is not None:
+            self.precomputed_proj = nn.Linear(precomputed_emb_dim, hidden_dim)
+        else:
+            self.precomputed_proj = None
 
         # Update time embedding to also incorporate perturbation
         # New conditioning will be: time_emb + pert_emb
@@ -480,7 +490,12 @@ class SEDDPerturbationTransformer(SEDDTransformer):
             p_emb = self.pert_embed(pert_labels.long())
         else:
             # pert_labels are already embeddings (from cond_label_lookup)
-            p_emb = pert_labels
+            # Project from precomputed dimension to hidden_dim if needed
+            if self.precomputed_proj is not None:
+                p_emb = self.precomputed_proj(pert_labels)
+            else:
+                # Fallback: assume embeddings are already correct dimension
+                p_emb = pert_labels
         p_emb = self.pert_proj(p_emb)
 
         # Combined conditioning: time + perturbation

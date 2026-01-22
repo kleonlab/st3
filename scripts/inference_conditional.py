@@ -427,6 +427,12 @@ def main():
     if cond_label_lookup is not None and len(missing_perts) > 0:
         print(f"WARNING: {len(missing_perts)} perturbations missing from conditional labels file")
 
+    # Infer precomputed embedding dimension from cond_label_lookup if provided
+    precomputed_emb_dim = None
+    if cond_label_lookup is not None and cond_label_lookup.dim() == 2:
+        precomputed_emb_dim = cond_label_lookup.shape[1]
+        print(f"Detected precomputed embedding dimension: {precomputed_emb_dim}")
+
     # Create model
     print("\nCreating perturbation prediction model...")
     model = SEDDPerturbationTransformerSmall(
@@ -437,7 +443,8 @@ def main():
         num_layers=train_config.get("num_layers", 4),
         num_heads=train_config.get("num_heads", 4),
         dropout=train_config.get("dropout", 0.1),
-        max_seq_len=NUM_GENES
+        max_seq_len=NUM_GENES,
+        precomputed_emb_dim=precomputed_emb_dim
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
