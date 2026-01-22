@@ -12,12 +12,12 @@ model:
 
 # Data parameters
 data:
-  train_data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/5k/k562_5k_train_split_processed.h5ad  # Must be specified via CLI or environment variable
+  train_data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_train_split_processed.h5ad # Must be specified via CLI or environment variable
   pert_col: perturbation  # Column in adata.obs with perturbation labels
   control_name: non-targeting # Name of control perturbation
   val_fraction: 0.1
   loader_path: /home/b5cc/sanjukta.b5cc/st3/examples/cell_load_config.toml
-  cond_labels_pt_path: /home/b5cc/sanjukta.b5cc/st3/datasets/5k/perturbation_mapping_5k.pt
+  cond_labels_pt_path: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/protein_embeddings.pt
 
 # Training hyperparameters
 training:
@@ -33,7 +33,7 @@ training:
 
 # Checkpoint and logging
 checkpointing:
-  checkpoint_dir: /home/b5cc/sanjukta.b5cc/st3/experiments/5k_psed
+  checkpoint_dir: /home/b5cc/sanjukta.b5cc/st3/experiments/30k
   save_interval: 10
   resume: null  # Path to checkpoint to resume from
 
@@ -50,8 +50,8 @@ inference:
   batch_size: 8
   num_batches: null  # null means all batches
   num_cells_visualize: 3
-  perturbations_file: /home/b5cc/sanjukta.b5cc/st3/datasets/5k/perturbation_names_5k.txt
-  perturbations_all_file: /home/b5cc/sanjukta.b5cc/st3/datasets/5k/perturbation_names_all_5k.txt
+  perturbations_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names.txt
+  perturbations_all_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names_all.txt
   num_samples_per_pert: 10 # null means all batches
   num_cells_visualize: 3
 
