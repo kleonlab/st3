@@ -474,7 +474,7 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         t_emb = self.time_embed(sigma)
 
         # Perturbation embedding
-        p_emb = self.pert_embed(pert_labels)
+        p_emb = self.pert_embed(pert_labels.long())
         p_emb = self.pert_proj(p_emb)
 
         # Combined conditioning: time + perturbation
