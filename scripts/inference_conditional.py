@@ -502,9 +502,13 @@ def main():
         for pert_name, pert_idx in tqdm(perturbations, desc="Generating"):
             for sample_idx in range(args.num_samples_per_pert):
                 x_init = torch.full((1, NUM_GENES),fill_value=graph.mask_index,dtype=torch.long,device=device)
-                print(x_init)
+
+                # Create perturbation label tensor
                 pert_label = torch.tensor([pert_idx], dtype=torch.long, device=device)
-                print(pert_label)
+
+                # Apply conditional label lookup if available (converts index to precomputed embedding)
+                pert_label = trainer._apply_cond_label_lookup(pert_label)
+
                 generated = sampler.sample(x_init,pert_labels=pert_label,show_progress=False)
                 
                 all_generated.append(generated.cpu())
