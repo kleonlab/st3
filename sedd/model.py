@@ -474,7 +474,13 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         t_emb = self.time_embed(sigma)
 
         # Perturbation embedding
-        p_emb = self.pert_embed(pert_labels.long())
+        # Check if pert_labels are already embeddings (2D) or indices (1D)
+        if pert_labels.dim() == 1:
+            # pert_labels are indices, use embedding layer
+            p_emb = self.pert_embed(pert_labels.long())
+        else:
+            # pert_labels are already embeddings (from cond_label_lookup)
+            p_emb = pert_labels
         p_emb = self.pert_proj(p_emb)
 
         # Combined conditioning: time + perturbation
