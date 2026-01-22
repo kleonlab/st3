@@ -463,7 +463,7 @@ def main():
     )
 
     print(f"\nLoading checkpoint from {checkpoint_path}")
-    trainer.load_checkpoint(checkpoint_path, load_optimizer=False)
+    trainer.load_checkpoint(checkpoint_path, load_optimizer=False, strict=False)
     print(f"Model loaded! Trained for {trainer.epoch + 1} epochs.")
     print(f"\nGenerating {args.num_samples_per_pert} samples per perturbation")
     print(f"Sampling parameters: num_steps={args.num_steps}, temperature={args.temperature}")
