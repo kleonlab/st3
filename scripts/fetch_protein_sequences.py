@@ -6,7 +6,13 @@ import argparse
 import time
 from pathlib import Path
 from typing import Dict, Optional
-import requests
+try:
+    import requests  # type: ignore
+except ModuleNotFoundError:
+    requests = None
+    from urllib.parse import urlencode
+    from urllib.request import urlopen
+
 
 
 def fetch_uniprot_sequence(gene_name: str, organism: str = "9606") -> Optional[str]:
@@ -31,11 +37,16 @@ def fetch_uniprot_sequence(gene_name: str, organism: str = "9606") -> Optional[s
     }
 
     try:
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
+        if requests is not None:
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            fasta_text = response.text.strip()
+        else:
+            query_string = urlencode(params)
+            with urlopen(f"{url}?{query_string}", timeout=30) as resp:
+                fasta_text = resp.read().decode("utf-8").strip()
 
         # Parse FASTA format
-        fasta_text = response.text.strip()
         if not fasta_text or fasta_text.startswith("<!DOCTYPE"):
             return None
 
@@ -47,7 +58,7 @@ def fetch_uniprot_sequence(gene_name: str, organism: str = "9606") -> Optional[s
         sequence = ''.join(lines[1:])  # Join all lines after header
         return sequence if sequence else None
 
-    except requests.RequestException as e:
+    except Exception as e:
         print(f"Error fetching {gene_name}: {e}")
         return None
 

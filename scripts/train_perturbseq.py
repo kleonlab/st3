@@ -76,7 +76,7 @@ def load_conditional_labels(pt_path, pert_names):
             if isinstance(label_val, torch.Tensor):
                 label_lookup.append(label_val.cpu())
             else:
-                label_lookup.append(torch.tensor(label_val))
+                label_lookup.append(torch.tensor(label_val, dtype=torch.long))
         else:
             # Use -1 for missing perturbations (will need to handle this)
             label_lookup.append(torch.tensor(-1))

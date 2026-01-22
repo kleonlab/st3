@@ -92,11 +92,11 @@ def stratified_label_split(adata_path: str, seed: int = 42) -> Tuple[sc.AnnData,
 
 # Example usage:
 if __name__ == "__main__":
-    adata = sc.read_h5ad("/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562.h5ad")
+    adata = sc.read_h5ad("/home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_filtered.h5ad")
     perturbation_list = adata.obs['gene'].value_counts()      
     print(perturbation_list)
     
-    train, test = stratified_label_split("/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562.h5ad")
+    train, test = stratified_label_split("/home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_filtered.h5ad")
     
     print("\n--- Train Gene Counts ---")
     print(train.obs['gene'].value_counts())

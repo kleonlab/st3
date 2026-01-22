@@ -119,6 +119,8 @@ def generate_embeddings(
 def save_embeddings(embeddings: Dict[str, torch.Tensor], output_path: str):
     """Save embeddings as a .pt file."""
     output_file = Path(output_path)
+    if output_file.is_dir() or str(output_path).endswith("/"):
+        output_file = output_file / "protein_embeddings.pt"
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Convert to a dictionary that can be saved

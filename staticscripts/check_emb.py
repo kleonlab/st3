@@ -1,8 +1,8 @@
 
 import torch
 
-pt_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/5k/perturbation_mapping_5k.pt"
-test_pt_list_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/5k/perturbation_names_5k.txt"
+pt_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/30k/protein_embeddings.pt"
+test_pt_list_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names_all.txt"
 
 
 def check_perturbation(pt_path, test_pt_list_path):
@@ -15,7 +15,6 @@ def check_perturbation(pt_path, test_pt_list_path):
     else:
         raise TypeError(f"Unsupported .pt format: {type(pt_data)}")
 
-    print(pt_data)
 
     present = [p for p in pert_names if p in pt_keys]
     missing = [p for p in pert_names if p not in pt_keys]
