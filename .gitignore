@@ -209,3 +209,4 @@ __marimo__/
 data/
 figures/
 pbmc/ 
+slurm_out/
