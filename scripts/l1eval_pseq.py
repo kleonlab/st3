@@ -11,11 +11,11 @@ import scanpy as sc
 import numpy as np 
 import torch
 
-output_dir = Path("/home/b5cc/sanjukta.b5cc/st3/experiments/5k_psed/evaluation")
+output_dir = Path("/home/b5cc/sanjukta.b5cc/st3/experiments/30k/evaluation")
 output_dir.mkdir(parents=True, exist_ok=True)
 
-test_data_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/5k/k562_5k_test_split.h5ad"
-predicted_data_path = "/home/b5cc/sanjukta.b5cc/st3/experiments/5k_psed/inference_results/generated_cells.h5ad"
+test_data_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_test_split.h5ad"
+predicted_data_path ="/home/b5cc/sanjukta.b5cc/st3/experiments/30k/inference_results/generated_cells.h5ad"
 
 # Load test data
 adata_test = sc.read_h5ad(test_data_path)

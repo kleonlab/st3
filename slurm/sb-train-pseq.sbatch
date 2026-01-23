@@ -60,7 +60,7 @@ echo "=========================================="
 echo ""
 
 # Default parameters (can be overridden by environment variables)
-CONFIG="${CONFIG:-configs/perturbseq_small.yaml}"
+CONFIG="${CONFIG:-configs/perturbseq_medium.yaml}"
 TRAIN_DATA_PATH="${TRAIN_DATA_PATH:-}"
 COND_LABELS_PT_PATH="${COND_LABELS_PT_PATH:-}"
 
