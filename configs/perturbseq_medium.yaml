@@ -21,8 +21,8 @@ data:
 
 # Training hyperparameters
 training:
-  batch_size: 8
-  num_epochs: 50
+  batch_size: 4
+  num_epochs: 20
   learning_rate: 1.0e-4
   weight_decay: 0.01
   mask_ratio: 0.15
@@ -34,7 +34,7 @@ training:
 # Checkpoint and logging
 checkpointing:
   checkpoint_dir: /home/b5cc/sanjukta.b5cc/st3/experiments/30k2
-  save_interval: 10
+  save_interval: 2
   resume: null  # Path to checkpoint to resume from
 
 logging:

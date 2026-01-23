@@ -4,8 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
-#SBATCH --mem-per-gpu=64G
-#SBATCH --time=12:00:00
+#SBATCH --mem-per-gpu=128G
+#SBATCH --time=20:00:00
 #SBATCH --qos=normal
 #SBATCH --output=slurm_out/sedd_pseq_train-%A.out
 #SBATCH --mail-type=END,FAIL
