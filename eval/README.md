@@ -45,25 +45,63 @@ pip install -e .
 
 ## Usage
 
-### Quick Start - Command Line
+### Quick Start - Simple Configuration
 
-Evaluate a model's performance:
+The easiest way to use the evaluation script is to edit the `CONFIG` dictionary at the top of `eval/evaluate.py`:
+
+```python
+CONFIG = {
+    # Input files (h5ad, npy, npz, csv formats supported)
+    'real_data_path': 'data/real.h5ad',
+    'predicted_data_path': 'data/predicted.h5ad',
+
+    # Evaluation mode: 'reconstruction', 'generation', or 'both'
+    'mode': 'both',
+
+    # Output settings (None to skip saving)
+    'output_path': 'results/evaluation_results.json',
+    'output_format': 'json',  # 'json' or 'txt'
+
+    # AnnData specific settings (for h5ad files)
+    'use_layer': None,  # Use specific layer (e.g., 'counts'), None for .X
+    'filter_by_perturbation': None,  # Filter by perturbation (e.g., 'gene1'), None for all
+    'filter_by_gene': None,  # Filter by gene label, None for all
+
+    # Generation metric parameters
+    'w2_projections': 1000,  # Number of projections for Wasserstein distance
+    'mmd_subsample': 2000,   # Max samples for MMD calculation (None for all)
+    'random_seed': 42,        # Random seed for reproducibility
+
+    # Display options
+    'verbose': True,  # Print detailed results
+}
+```
+
+Then simply run:
 
 ```bash
-# Both reconstruction and generation metrics
-python eval/evaluate.py --real data/real.npy --pred data/predicted.npy --mode both
+python eval/evaluate.py
+```
 
-# Only reconstruction metrics
-python eval/evaluate.py --real data/real.npy --pred data/reconstructed.npy --mode reconstruction
+### Command Line Usage (Optional)
 
-# Only generation metrics
-python eval/evaluate.py --real data/real.npy --pred data/generated.npy --mode generation
+You can also override the CONFIG settings via command line:
 
-# Save results to file
-python eval/evaluate.py --real data/real.npy --pred data/predicted.npy --output results.json
+```bash
+# Run with defaults from CONFIG
+python eval/evaluate.py
 
-# With AnnData format
-python eval/evaluate.py --real data/real.h5ad --pred data/predicted.h5ad --mode both
+# Override specific settings
+python eval/evaluate.py --real data/real.h5ad --pred data/predicted.h5ad
+
+# Filter by perturbation label
+python eval/evaluate.py --filter-perturbation gene1
+
+# Generation metrics only
+python eval/evaluate.py --mode generation --output results/gen_metrics.json
+
+# Use specific layer from h5ad
+python eval/evaluate.py --use-layer counts
 ```
 
 ### Python API
@@ -137,10 +175,47 @@ fd = frechet_distance(real, generated)
 
 - **`.npy`** - NumPy array files
 - **`.npz`** - Compressed NumPy files
-- **`.h5ad`** - AnnData files (requires scanpy)
+- **`.h5ad`** - AnnData files (requires scanpy) with gene/perturbation label support
 - **`.csv`** / **`.tsv`** - Text files (cells × genes)
 
 All formats should contain a 2D matrix of shape `(n_cells, n_genes)`.
+
+### Working with h5ad Files
+
+The evaluation script has special support for h5ad (AnnData) files commonly used in single-cell RNA-seq analysis:
+
+**Gene/Perturbation Labels**:
+- Automatically detects `perturbation`, `perturbation_label`, `gene`, or `gene_label` columns in `adata.obs`
+- Can filter by specific perturbations or genes
+- Metadata about available labels is included in results
+
+**Multiple Layers**:
+- Can use specific layers (e.g., `counts`, `normalized`) instead of the default `.X`
+- Useful for comparing raw vs. processed data
+
+**Example h5ad structure**:
+```python
+import scanpy as sc
+
+adata = sc.read_h5ad('data.h5ad')
+# adata.X: main expression matrix (n_cells × n_genes)
+# adata.obs: cell metadata with columns like 'perturbation', 'gene', etc.
+# adata.var: gene metadata
+# adata.layers: additional expression matrices (e.g., 'counts', 'normalized')
+```
+
+**Filtering examples**:
+```python
+# In CONFIG:
+'filter_by_perturbation': 'KRAS',  # Only evaluate cells with KRAS perturbation
+'filter_by_gene': 'TP53',          # Only evaluate cells with TP53 gene label
+'use_layer': 'counts',              # Use raw counts instead of .X
+```
+
+Or via command line:
+```bash
+python eval/evaluate.py --filter-perturbation KRAS --use-layer counts
+```
 
 ## Example Workflow
 
