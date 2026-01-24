@@ -149,6 +149,7 @@ class SEDDTrainer:
         log_interval: int = 100,
         val_interval: int = 1,
         checkpoint_dir: Optional[str] = None,
+        save_interval: int = 10,
         callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
         if checkpoint_dir:
@@ -204,7 +205,7 @@ class SEDDTrainer:
                 }
                 callback(self, epoch, metrics)
 
-            if checkpoint_dir and (epoch + 1) % 10 == 0:
+            if checkpoint_dir and (epoch + 1) % save_interval == 0:
                 self.save_checkpoint(checkpoint_dir / f"epoch_{epoch + 1}.pt")
 
         if checkpoint_dir:
@@ -566,6 +567,7 @@ class PerturbationTrainer:
         log_interval: int = 100,
         val_interval: int = 1,
         checkpoint_dir: Optional[str] = None,
+        save_interval: int = 10,
         callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
 
@@ -618,7 +620,7 @@ class PerturbationTrainer:
                 }
                 callback(self, epoch, metrics)
 
-            if checkpoint_dir and (epoch + 1) % 10 == 0:
+            if checkpoint_dir and (epoch + 1) % save_interval == 0:
                 self.save_checkpoint(checkpoint_dir / f"epoch_{epoch + 1}.pt")
 
         if checkpoint_dir:

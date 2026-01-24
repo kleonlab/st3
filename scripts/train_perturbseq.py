@@ -24,6 +24,50 @@ from sedd.trainer import PerturbationTrainer
 from sedd.data import PerturbSeqDataset, train_val_split
 
 
+def find_checkpoint(checkpoint_dir):
+    """
+    Find the latest checkpoint in a checkpoint directory.
+
+    Priority:
+    1. Most recent epoch checkpoint (epoch_*.pt)
+    2. final.pt (if no epoch checkpoints exist)
+    3. best.pt (if no final checkpoint exists)
+
+    Args:
+        checkpoint_dir: Path to directory containing checkpoints
+
+    Returns:
+        Path to the latest checkpoint, or None if no checkpoints found
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+
+    if not checkpoint_dir.exists():
+        return None
+
+    # Find most recent epoch checkpoint (highest epoch number)
+    checkpoints = list(checkpoint_dir.glob("epoch_*.pt"))
+    if checkpoints:
+        # Sort by epoch number
+        checkpoints.sort(key=lambda x: int(x.stem.split("_")[1]))
+        latest = checkpoints[-1]
+        print(f"Found latest epoch checkpoint: {latest}")
+        return latest
+
+    # Check for final checkpoint
+    final_ckpt = checkpoint_dir / "final.pt"
+    if final_ckpt.exists():
+        print(f"Found final checkpoint: {final_ckpt}")
+        return final_ckpt
+
+    # Check for best checkpoint
+    best_ckpt = checkpoint_dir / "best.pt"
+    if best_ckpt.exists():
+        print(f"Found best checkpoint: {best_ckpt}")
+        return best_ckpt
+
+    return None
+
+
 def load_yaml_config(config_path):
     config_file = Path(config_path)
     with open(config_file, "r") as f:
@@ -432,9 +476,19 @@ def main():
 
     # Resume from checkpoint if specified
     if args.resume:
-        print(f"\nResuming from checkpoint: {args.resume}")
-        trainer.load_checkpoint(args.resume)
-        print(f"Resumed from epoch {trainer.epoch + 1}")
+        # Support auto-resume from latest checkpoint
+        if args.resume.lower() in ["auto", "latest", "last"]:
+            print(f"\nAuto-resuming from latest checkpoint in {checkpoint_dir}")
+            checkpoint_path = find_checkpoint(checkpoint_dir)
+            if checkpoint_path:
+                trainer.load_checkpoint(checkpoint_path)
+                print(f"Resumed from epoch {trainer.epoch + 1}")
+            else:
+                print("No checkpoint found, starting from scratch")
+        else:
+            print(f"\nResuming from checkpoint: {args.resume}")
+            trainer.load_checkpoint(args.resume)
+            print(f"Resumed from epoch {trainer.epoch + 1}")
 
     history = trainer.train(
         train_loader=train_loader,
@@ -443,7 +497,8 @@ def main():
         mask_ratio=args.mask_ratio,
         log_interval=args.log_interval,
         val_interval=args.val_interval,
-        checkpoint_dir=checkpoint_dir
+        checkpoint_dir=checkpoint_dir,
+        save_interval=args.save_interval
     )
 
     print("\nTraining complete!")
