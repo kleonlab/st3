@@ -52,7 +52,7 @@ inference:
   num_cells_visualize: 3
   perturbations_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names.txt
   perturbations_all_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names_all.txt
-  num_samples_per_pert: 10 # null means all batches
+  num_samples_per_pert: 1000 # null means all batches
   num_cells_visualize: 3
 
 
