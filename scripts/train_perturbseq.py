@@ -295,7 +295,7 @@ def parse_args():
     parser.add_argument(
         "--expand_to_full_genes",
         action="store_true",
-        default=model_config.get("expand_to_full_genes", False),
+        default=model_config.get("expand_to_full_genes", True),
         help="Enable HVG input → full gene output expansion. When True, model takes HVG input "
              "but predicts and computes loss on full gene space."
     )
@@ -478,7 +478,8 @@ def main():
     # - Change to other key or full expression for different input sizes
     dm = PerturbationDataModule(
         toml_config_path=args.loader_path,
-        embed_key="X_hvg",  # LINE 478: Change this to use different input (e.g., "X" for full)
+        embed_key="X_hvg",
+        # LINE 478: Change this to use different input (e.g., "X" for full)
         num_workers=0,
         batch_size=1,
         pert_col="gene",
