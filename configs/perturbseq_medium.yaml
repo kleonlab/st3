@@ -21,7 +21,7 @@ data:
 
 # Training hyperparameters
 training:
-  batch_size: 16
+  batch_size: 2048
   num_epochs: 20
   learning_rate: 1.0e-4
   weight_decay: 0.01
@@ -35,10 +35,10 @@ training:
 checkpointing:
   checkpoint_dir: /home/b5cc/sanjukta.b5cc/st3/experiments/30k2
   save_interval: 2
-  resume: null  # Path to checkpoint to resume from
+  resume: latest  # Path to checkpoint to resume from
 
 logging:
-  log_interval: 5
+  log_interval: 2
   val_interval: 1
 
 # Inference parameters

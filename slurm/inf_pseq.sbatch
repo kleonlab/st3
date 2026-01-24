@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
 #SBATCH --mem-per-gpu=64G
-#SBATCH --time=2:00:00
+#SBATCH --time=8:00:00
 #SBATCH --qos=normal
 #SBATCH --output=slurm_out/sedd_pseq_inference-%A.out
 #SBATCH --mail-type=END,FAIL
@@ -60,8 +60,8 @@ echo "=========================================="
 echo ""
 
 # Default parameters (can be overridden by environment variables)
-CONFIG="${CONFIG:-configs/perturbseq_dry_run.yaml}"
-EXPERIMENT_DIR="${EXPERIMENT_DIR:-experiments/psed_demo/perturbseq_dry_run}"
+CONFIG="${CONFIG:-configs/perturbseq_small.yaml}"
+EXPERIMENT_DIR="${EXPERIMENT_DIR:-/home/b5cc/sanjukta.b5cc/st3/experiments/5k_psed}"
 TEST_DATA_PATH="${TEST_DATA_PATH:-}"
 
 # Print inference configuration

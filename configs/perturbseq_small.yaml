@@ -5,9 +5,9 @@
 # Model architecture
 model:
   name: SEDDPerturbationTransformerSmall
-  hidden_dim: 32
-  num_layers: 4
-  num_heads: 4
+  hidden_dim: 256
+  num_layers: 8
+  num_heads: 8
   dropout: 0.1
 
 # Data parameters
@@ -18,10 +18,11 @@ data:
   val_fraction: 0.1
   loader_path: /home/b5cc/sanjukta.b5cc/st3/examples/cell_load_config.toml
   cond_labels_pt_path: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/protein_embeddings.pt
+  data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_test_split.h5ad
 
 # Training hyperparameters
 training:
-  batch_size: 8
+  batch_size: 64
   num_epochs: 50
   learning_rate: 1.0e-4
   weight_decay: 0.01
@@ -44,10 +45,10 @@ logging:
 # Inference parameters
 inference:
   mask_ratio: 0.2
-  num_steps: 50
+  num_steps: 20
   temperature: 1.0
   sampler: euler
-  batch_size: 8
+  batch_size: 2048
   num_batches: null  # null means all batches
   num_cells_visualize: 3
   perturbations_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names.txt
