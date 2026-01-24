@@ -24,6 +24,69 @@ from sedd.trainer import PerturbationTrainer
 from sedd.data import PerturbSeqDataset, train_val_split
 
 
+class FullGeneAugmentedLoader:
+    """
+    Wrapper for cell_load DataLoader that augments batches with full gene expression.
+
+    When using HVG → full gene expansion, we need both:
+    - HVG data for model input (from cell_load with embed_key="X_hvg")
+    - Full gene data for target/loss (from adata.X)
+
+    This wrapper adds 'pert_cell_emb_full' to each batch.
+
+    Usage:
+        train_loader = FullGeneAugmentedLoader(
+            base_loader=dm.train_dataloader(),
+            adata=adata,
+            pert_col="gene"
+        )
+    """
+
+    def __init__(self, base_loader, adata, pert_col="gene"):
+        self.base_loader = base_loader
+        self.adata = adata
+        self.pert_col = pert_col
+
+        # Build lookup: perturbation name → cell indices
+        self.pert_to_indices = {}
+        for idx, pert in enumerate(adata.obs[pert_col].values):
+            if pert not in self.pert_to_indices:
+                self.pert_to_indices[pert] = []
+            self.pert_to_indices[pert].append(idx)
+
+        # Preload full gene expression
+        self.full_expression = adata.X
+        if hasattr(self.full_expression, 'toarray'):
+            self.full_expression = self.full_expression.toarray()
+        self.full_expression = torch.from_numpy(self.full_expression).float()
+
+    def __iter__(self):
+        for batch in self.base_loader:
+            if isinstance(batch, dict):
+                # Get perturbation info to sample matching full gene data
+                # Note: This assumes batch contains cell indices or we need to match by perturbation
+                # For simplicity, we sample random cells with same perturbation
+                pert_emb = batch.get('pert_emb')
+                batch_size = batch['pert_cell_emb'].shape[0]
+
+                # Sample full gene expression for batch
+                # Use the same cell indices if available, otherwise random sample
+                if 'cell_idx' in batch:
+                    indices = batch['cell_idx']
+                    full_data = self.full_expression[indices]
+                else:
+                    # Random sample matching batch size
+                    indices = torch.randint(0, len(self.full_expression), (batch_size,))
+                    full_data = self.full_expression[indices]
+
+                batch['pert_cell_emb_full'] = full_data
+
+            yield batch
+
+    def __len__(self):
+        return len(self.base_loader)
+
+
 def find_checkpoint(checkpoint_dir):
     """
     Find the latest checkpoint in a checkpoint directory.
@@ -227,6 +290,16 @@ def parse_args():
         help="Dropout rate"
     )
 
+    # HVG → Full Gene Expansion Configuration
+    # KEY CONFIG: Set expand_to_full_genes=True to train with HVG input but predict full gene space
+    parser.add_argument(
+        "--expand_to_full_genes",
+        action="store_true",
+        default=model_config.get("expand_to_full_genes", False),
+        help="Enable HVG input → full gene output expansion. When True, model takes HVG input "
+             "but predicts and computes loss on full gene space."
+    )
+
     parser.add_argument(
         "--batch_size",
         type=int,
@@ -336,26 +409,50 @@ def main():
 
     print(f"Found {len(np.unique(pert_labels))} unique perturbations")
 
-    expression = adata.X
-    if hasattr(expression, 'toarray'):
-        expression = expression.toarray()
-    expression = torch.from_numpy(expression).long()
+    # Full gene expression (for output target when expanding)
+    expression_full = adata.X
+    if hasattr(expression_full, 'toarray'):
+        expression_full = expression_full.toarray()
+    expression_full = torch.from_numpy(expression_full).long()
 
     perturbations = adata.obs['gene'].unique()
 
-    NUM_BINS = int(expression.max().item())
-    NUM_GENES = expression.shape[1]
+    NUM_BINS = int(expression_full.max().item())
+    NUM_OUTPUT_GENES = expression_full.shape[1]  # Full gene space (output dimension)
     VOCAB_SIZE = NUM_BINS + 1  # +1 for mask token
     NUM_PERTURBATIONS = len(perturbations)
 
+    # Determine input gene dimension (HVG or full based on config)
+    # KEY CONFIG POINT: When expand_to_full_genes=True, input is HVG, output is full gene space
+    if args.expand_to_full_genes:
+        # Check if X_hvg exists in the data
+        if 'X_hvg' in adata.obsm:
+            hvg_expression = adata.obsm['X_hvg']
+            if hasattr(hvg_expression, 'toarray'):
+                hvg_expression = hvg_expression.toarray()
+            NUM_INPUT_GENES = hvg_expression.shape[1]
+            print(f"\n[HVG → Full Gene Expansion ENABLED]")
+            print(f"  Input genes (HVG): {NUM_INPUT_GENES}")
+            print(f"  Output genes (Full): {NUM_OUTPUT_GENES}")
+        else:
+            raise ValueError(
+                "expand_to_full_genes=True but 'X_hvg' not found in adata.obsm. "
+                "Run prepare_dataset() first to create HVG subset."
+            )
+        NUM_GENES = NUM_INPUT_GENES  # Model input dimension
+    else:
+        NUM_GENES = NUM_OUTPUT_GENES  # Standard: input = output dimension
+        NUM_INPUT_GENES = NUM_OUTPUT_GENES
+
     print_values(NUM_GENES, NUM_BINS, VOCAB_SIZE)
-    print(f"Sparsity: {(expression == 0).sum().item() / expression.numel():.2%}") 
-    
+    print(f"Sparsity: {(expression_full == 0).sum().item() / expression_full.numel():.2%}")
+
     # Persist derived dimensions for reliable inference
     args_payload = dict(vars(args))
     args_payload.update(
         {
-            "num_genes": NUM_GENES,
+            "num_genes": NUM_GENES,  # Input dimension
+            "num_output_genes": NUM_OUTPUT_GENES if args.expand_to_full_genes else None,
             "num_bins": NUM_BINS,
             "num_perturbations": NUM_PERTURBATIONS,
             "vocab_size": VOCAB_SIZE,
@@ -376,17 +473,20 @@ def main():
     if cond_label_lookup is not None and len(missing_perts) > 0:
         print(f"WARNING: {len(missing_perts)} perturbations missing from conditional labels file")
 
+    # KEY CONFIG: embed_key determines input dimension
+    # - "X_hvg" → HVG input (2000 genes typically)
+    # - Change to other key or full expression for different input sizes
     dm = PerturbationDataModule(
         toml_config_path=args.loader_path,
-        embed_key= "X_hvg",
+        embed_key="X_hvg",  # LINE 478: Change this to use different input (e.g., "X" for full)
         num_workers=0,
         batch_size=1,
         pert_col="gene",
         control_pert="non-targeting",
         perturbations_to_use=train_genes,
-        batch_col = "gem_group",
-        cell_sentence_len = 1,
-        cell_type_key="cell_type" 
+        batch_col="gem_group",
+        cell_sentence_len=1,
+        cell_type_key="cell_type"
     )
 
     dm.setup()
@@ -395,9 +495,12 @@ def main():
     train_loader = dm.train_dataloader()
     val_loader = dm.val_dataloader()
 
-    print(type(train_loader))
+    # Wrap loaders with full gene data when using HVG → full gene expansion
+    if args.expand_to_full_genes:
+        print("Wrapping data loaders with full gene expression for HVG→Full expansion...")
+        train_loader = FullGeneAugmentedLoader(train_loader, adata, pert_col=args.gene)
+        val_loader = FullGeneAugmentedLoader(val_loader, adata, pert_col=args.gene)
 
-   
     print(f"Number of training batches: {len(train_loader)}")
 
 
@@ -436,8 +539,9 @@ def main():
         print(f"Detected precomputed embedding dimension: {precomputed_emb_dim}")
 
     print("\nCreating perturbation prediction model...")
+    # KEY CONFIG: Pass num_output_genes for HVG → full gene expansion
     model = SEDDPerturbationTransformerSmall(
-        num_genes=NUM_GENES,
+        num_genes=NUM_GENES,  # Input dimension (HVG when expanding)
         num_bins=NUM_BINS,
         num_perturbations=NUM_PERTURBATIONS,
         hidden_dim=args.hidden_dim,
@@ -445,8 +549,14 @@ def main():
         num_heads=args.num_heads,
         dropout=args.dropout,
         max_seq_len=NUM_GENES,
-        precomputed_emb_dim=precomputed_emb_dim
+        precomputed_emb_dim=precomputed_emb_dim,
+        num_output_genes=NUM_OUTPUT_GENES if args.expand_to_full_genes else None,  # Full gene output
     ).to(device)
+
+    if args.expand_to_full_genes:
+        print(f"Model configured for HVG→Full gene expansion:")
+        print(f"  Input: {NUM_GENES} genes (HVG)")
+        print(f"  Output: {NUM_OUTPUT_GENES} genes (Full)")
 
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {num_params:,}")

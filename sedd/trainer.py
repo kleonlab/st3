@@ -338,15 +338,18 @@ class PerturbationTrainer:
         pert_labels: Tensor,
         perturbed: Tensor,
         mask_ratio: float = 0.15,
+        perturbed_full: Optional[Tensor] = None,
     ) -> Tensor:
         """
         Compute perturbation prediction loss.
 
         Args:
-            control: Control cell expression [batch, seq_len] (currently unused but available)
             pert_labels: Perturbation labels [batch]
-            perturbed: True perturbed expression [batch, seq_len]
+            perturbed: Perturbed expression for model input [batch, seq_len]
+                       (HVG size when using expansion, full gene size otherwise)
             mask_ratio: Masking ratio (used by absorbing graph)
+            perturbed_full: Full gene expression target [batch, num_output_genes].
+                            Required when model.expand_output=True for HVG→full gene training.
 
         Returns:
             Cross-entropy loss at masked positions
@@ -358,19 +361,31 @@ class PerturbationTrainer:
         t = torch.rand(batch_size, device=device)
         sigma = self.noise.total(t)
 
-        # Apply discrete diffusion (masking) to perturbed cells
+        # Apply discrete diffusion (masking) to input (HVG or full depending on mode)
         if isinstance(self.graph, AbsorbingGraph):
             x_noised = self._mask_tokens(perturbed, mask_ratio, sigma)
         else:
             x_noised = self.graph.sample_transition(perturbed, sigma)
 
-        # Model predicts perturbed from noised + perturbation label
+        # Handle HVG → full gene expansion
+        x_noised_output = None
+        x_target = perturbed  # Default: same as input
+
+        if hasattr(self.model, 'expand_output') and self.model.expand_output:
+            if perturbed_full is None:
+                raise ValueError("perturbed_full required when model.expand_output=True")
+            # Apply masking to full gene target for loss computation
+            x_noised_output = self._mask_tokens(perturbed_full, mask_ratio, sigma)
+            x_target = perturbed_full  # Target is full gene space
+
+        # Model predicts from noised input + perturbation label
         loss = self.model.get_loss(
-            x_perturbed=perturbed,
+            x_perturbed=x_target,
             x_noised=x_noised,
             sigma=sigma,
             pert_labels=pert_labels,
             graph=self.graph,
+            x_noised_output=x_noised_output,
         )
 
         return loss
@@ -408,11 +423,19 @@ class PerturbationTrainer:
         self.model.train()
         self.optimizer.zero_grad()
 
+        perturbed_full = None  # Full gene target (only used when expand_output=True)
+
         # Unpack batch - handle cell-load dictionary format
         if isinstance(batch, dict):
             # Cell-load batch format
             perturbed = batch['pert_cell_emb'].to(self.device)
             pert_emb = batch['pert_emb'].to(self.device)
+
+            # Check for full gene expression target (for HVG→full gene expansion)
+            # KEY: 'pert_cell_emb_full' contains full gene expression when using expansion
+            if 'pert_cell_emb_full' in batch:
+                perturbed_full = batch['pert_cell_emb_full'].to(self.device)
+                perturbed_full = torch.round(perturbed_full).long()
 
             # Convert one-hot perturbation embeddings to indices
             # If pert_emb is one-hot, use argmax to get indices
@@ -421,8 +444,13 @@ class PerturbationTrainer:
             else:
                 pert_labels = pert_emb.squeeze(-1).long()
         else:
-            # Legacy tuple format: (pert_labels, perturbed)
-            pert_labels, perturbed = batch
+            # Legacy tuple format: (pert_labels, perturbed) or (pert_labels, perturbed, perturbed_full)
+            if len(batch) == 3:
+                pert_labels, perturbed, perturbed_full = batch
+                perturbed_full = perturbed_full.to(self.device)
+                perturbed_full = torch.round(perturbed_full).long()
+            else:
+                pert_labels, perturbed = batch
             pert_labels = pert_labels.to(self.device)
             perturbed = perturbed.to(self.device)
 
@@ -438,8 +466,8 @@ class PerturbationTrainer:
         # Round and convert to long for discrete tokens
         perturbed = torch.round(perturbed).long()
 
-        # Compute loss
-        loss = self.compute_loss(pert_labels, perturbed, mask_ratio)
+        # Compute loss (pass perturbed_full for HVG→full gene expansion)
+        loss = self.compute_loss(pert_labels, perturbed, mask_ratio, perturbed_full)
 
         # Backward pass
         loss.backward()
@@ -523,11 +551,18 @@ class PerturbationTrainer:
         num_batches = 0
 
         for batch in val_loader:
+            perturbed_full = None  # Full gene target (only used when expand_output=True)
+
             # Unpack batch - handle cell-load dictionary format
             if isinstance(batch, dict):
                 # Cell-load batch format
                 perturbed = batch['pert_cell_emb'].to(self.device)
                 pert_emb = batch['pert_emb'].to(self.device)
+
+                # Check for full gene expression target (for HVG→full gene expansion)
+                if 'pert_cell_emb_full' in batch:
+                    perturbed_full = batch['pert_cell_emb_full'].to(self.device)
+                    perturbed_full = torch.round(perturbed_full).long()
 
                 # Convert one-hot perturbation embeddings to indices
                 if pert_emb.dim() == 2 and pert_emb.shape[1] > 1:
@@ -535,8 +570,13 @@ class PerturbationTrainer:
                 else:
                     pert_labels = pert_emb.squeeze(-1).long()
             else:
-                # Legacy tuple format: (control, pert_labels, perturbed)
-                control, pert_labels, perturbed = batch
+                # Legacy tuple format: (pert_labels, perturbed) or (pert_labels, perturbed, perturbed_full)
+                if len(batch) == 3:
+                    pert_labels, perturbed, perturbed_full = batch
+                    perturbed_full = perturbed_full.to(self.device)
+                    perturbed_full = torch.round(perturbed_full).long()
+                else:
+                    pert_labels, perturbed = batch
                 pert_labels = pert_labels.to(self.device)
                 perturbed = perturbed.to(self.device)
 
@@ -552,7 +592,7 @@ class PerturbationTrainer:
             # Round and convert to long for discrete tokens
             perturbed = torch.round(perturbed).long()
 
-            loss = self.compute_loss(pert_labels, perturbed, mask_ratio)
+            loss = self.compute_loss(pert_labels, perturbed, mask_ratio, perturbed_full)
             total_loss += loss.item()
             num_batches += 1
 

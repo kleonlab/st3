@@ -384,10 +384,11 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         - Inherits token, gene, and time embeddings from SEDDTransformer
         - Adds perturbation embedding for conditioning
         - Combines time and perturbation embeddings for adaptive layer norm
+        - Optionally supports HVG input → full gene output via cross-attention expansion
 
     Training:
-        - Input: control cell expression + perturbation label
-        - Target: perturbed cell expression
+        - Input: control cell expression + perturbation label (can be HVG subset)
+        - Target: perturbed cell expression (can be full gene space)
         - Uses discrete diffusion with masking
     """
 
@@ -403,10 +404,11 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         dropout: float = 0.1,
         max_seq_len: int = 4096,
         precomputed_emb_dim: int = None,
+        num_output_genes: int = None,
     ):
         """
         Args:
-            num_genes: Number of genes (sequence length)
+            num_genes: Number of input genes (e.g., HVGs = 2000)
             num_bins: Number of expression bins (vocabulary size, excluding mask)
             num_perturbations: Number of unique perturbation conditions
             hidden_dim: Transformer hidden dimension
@@ -414,8 +416,10 @@ class SEDDPerturbationTransformer(SEDDTransformer):
             num_heads: Number of attention heads
             ff_mult: Feed-forward expansion factor
             dropout: Dropout rate
-            max_seq_len: Maximum sequence length
+            max_seq_len: Maximum sequence length for input
             precomputed_emb_dim: Dimension of pre-computed embeddings (e.g., 320 for ESM2), if using
+            num_output_genes: Number of output genes (full gene space). If None, equals num_genes.
+                              Set this to enable HVG input → full gene output expansion.
         """
         super().__init__(
             num_genes=num_genes,
@@ -430,6 +434,11 @@ class SEDDPerturbationTransformer(SEDDTransformer):
 
         self.num_perturbations = num_perturbations
         self.precomputed_emb_dim = precomputed_emb_dim
+
+        # Output gene space configuration
+        # KEY CONFIG: Set num_output_genes to full gene count to enable HVG → full gene expansion
+        self.num_output_genes = num_output_genes if num_output_genes is not None else num_genes
+        self.expand_output = (self.num_output_genes != num_genes)
 
         # Perturbation embedding
         self.pert_embed = nn.Embedding(num_perturbations, hidden_dim)
@@ -449,6 +458,34 @@ class SEDDPerturbationTransformer(SEDDTransformer):
             nn.Linear(hidden_dim * 4, hidden_dim),
         )
 
+        # Output expansion layers (HVG → full gene space)
+        if self.expand_output:
+            # Output gene position embeddings (for full gene space)
+            self.output_gene_embed = nn.Embedding(self.num_output_genes, hidden_dim)
+
+            # Cross-attention: output positions attend to HVG hidden states
+            self.cross_attn = nn.MultiheadAttention(
+                embed_dim=hidden_dim,
+                num_heads=num_heads,
+                dropout=dropout,
+                batch_first=True,
+            )
+            self.cross_attn_norm = AdaptiveLayerNorm(hidden_dim, hidden_dim)
+
+            # Feed-forward after cross-attention
+            ff_dim = int(hidden_dim * ff_mult)
+            self.cross_ff = nn.Sequential(
+                nn.Linear(hidden_dim, ff_dim),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(ff_dim, hidden_dim),
+                nn.Dropout(dropout),
+            )
+            self.cross_ff_norm = AdaptiveLayerNorm(hidden_dim, hidden_dim)
+
+            # Output projection for expanded space
+            self.out_proj_expanded = nn.Linear(hidden_dim, self.vocab_size, bias=False)
+
         self._init_weights()
 
     def forward(
@@ -460,13 +497,15 @@ class SEDDPerturbationTransformer(SEDDTransformer):
     ) -> Tensor:
         """
         Args:
-            x: Input tokens [batch, seq_len]
+            x: Input tokens [batch, seq_len] (can be HVG subset)
             sigma: Diffusion time [batch] or scalar
             pert_labels: Perturbation labels [batch]
             mask: Optional attention mask [batch, seq_len]
 
         Returns:
-            Logits [batch, seq_len, vocab_size]
+            Logits [batch, output_seq_len, vocab_size]
+            - If expand_output=False: output_seq_len = seq_len (input size)
+            - If expand_output=True: output_seq_len = num_output_genes (full gene space)
         """
         batch_size, seq_len = x.shape
         device = x.device
@@ -501,13 +540,37 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         # Combined conditioning: time + perturbation
         cond = t_emb + p_emb
 
-        # Transformer blocks
+        # Transformer blocks (encode HVG input)
         for block in self.blocks:
             h = block(h, cond, mask)
 
-        # Output
-        h = self.out_norm(h, cond)
-        logits = self.out_proj(h)
+        # Output expansion: HVG hidden states → full gene space
+        if self.expand_output:
+            # h is now [batch, hvg_len, hidden_dim] - encoded HVG representations
+
+            # Create output gene queries (full gene space)
+            out_pos_idx = torch.arange(self.num_output_genes, device=device)
+            out_queries = self.output_gene_embed(out_pos_idx).unsqueeze(0)  # [1, num_output_genes, hidden_dim]
+            out_queries = out_queries.expand(batch_size, -1, -1)  # [batch, num_output_genes, hidden_dim]
+
+            # Cross-attention: output positions attend to HVG hidden states
+            out_queries_normed = self.cross_attn_norm(out_queries, cond)
+            h_out, _ = self.cross_attn(
+                query=out_queries_normed,
+                key=h,
+                value=h,
+            )
+            h_out = out_queries + h_out  # Residual connection
+
+            # Feed-forward
+            h_out = h_out + self.cross_ff(self.cross_ff_norm(h_out, cond))
+
+            # Output projection
+            logits = self.out_proj_expanded(h_out)
+        else:
+            # Standard output (same dimension as input)
+            h = self.out_norm(h, cond)
+            logits = self.out_proj(h)
 
         return logits
 
@@ -531,30 +594,39 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         pert_labels: Tensor,
         graph,
         mask: Optional[Tensor] = None,
+        x_noised_output: Optional[Tensor] = None,
     ) -> Tensor:
         """
         Compute perturbation prediction loss.
 
         Args:
-            x_control: Control cell expression [batch, seq_len]
-            x_perturbed: True perturbed expression (target) [batch, seq_len]
-            x_noised: Noised perturbed expression (input) [batch, seq_len]
+            x_perturbed: True perturbed expression (target) [batch, seq_len] or [batch, num_output_genes]
+            x_noised: Noised perturbed expression (input) [batch, seq_len] (HVG size when expanding)
             sigma: Diffusion time [batch]
             pert_labels: Perturbation labels [batch]
             graph: Diffusion graph (for mask index)
             mask: Optional attention mask
+            x_noised_output: Noised version of full gene target [batch, num_output_genes].
+                             Required when expand_output=True to determine masked positions in output space.
 
         Returns:
             Cross-entropy loss at masked positions
         """
-        # Predict perturbed expression from noised perturbed + perturbation label
+        # Predict perturbed expression from noised input + perturbation label
         pred_score = self.score(x_noised, sigma, pert_labels, mask)
 
-        # Only compute loss at masked positions
-        is_masked = (x_noised == self.mask_index)
+        # Determine masked positions based on output space
+        if self.expand_output:
+            # When expanding: use output-space noised tensor for mask positions
+            if x_noised_output is None:
+                raise ValueError("x_noised_output required when expand_output=True")
+            is_masked = (x_noised_output == self.mask_index)
+        else:
+            # Standard case: input and output have same dimensions
+            is_masked = (x_noised == self.mask_index)
 
         if not is_masked.any():
-            return torch.tensor(0.0, device=x_perturbed.device, requires_grad = True)
+            return torch.tensor(0.0, device=x_perturbed.device, requires_grad=True)
 
         pred_at_mask = pred_score[is_masked]  # [num_masked, vocab_size]
         target_at_mask = x_perturbed[is_masked]  # [num_masked]
