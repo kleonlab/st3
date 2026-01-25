@@ -28,7 +28,7 @@ training:
 
 # Checkpoint and logging
 checkpointing:
-  checkpoint_dir: experiments/rnaseq_small
+  checkpoint_dir: experiments/mlm/128,4,4
   save_interval: 10
   resume: null  # Path to checkpoint to resume from
 

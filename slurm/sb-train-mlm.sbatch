@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
 #SBATCH --mem-per-gpu=64G
-#SBATCH --time=4:00:00
+#SBATCH --time=1:00:00
 #SBATCH --qos=normal
 #SBATCH --output=slurm_out/sedd_train-%A.out
 #SBATCH --mail-type=END,FAIL
@@ -61,7 +61,7 @@ echo ""
 
 # Default parameters (can be overridden by environment variables)
 CONFIG="${CONFIG:-configs/rnaseq_small.yaml}"
-DATA_PATH="${DATA_PATH:-}"
+DATA_PATH="${DATA_PATH:-/home/b5cc/sanjukta.b5cc/st3/datasets/dentate/dentate.h5ad}"
 
 # Print training configuration
 echo "Training Configuration:"

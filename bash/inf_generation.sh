@@ -13,12 +13,12 @@ echo "=========================================="
 echo ""
 
 # Defaults (override via environment variables before running)
-EXPERIMENT_DIR="${EXPERIMENT_DIR:-experiments/quick_test}"
+EXPERIMENT_DIR="${EXPERIMENT_DIR:-experiments/mlm_demo/rnaseq_small}"
 CHECKPOINT="${CHECKPOINT:-""}"  # optional specific checkpoint path
 DATA_PATH="${DATA_PATH:-/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad}"
 
 NUM_GENERATE="${NUM_GENERATE:-5}"
-NUM_STEPS="${NUM_STEPS:-100}"
+NUM_STEPS="${NUM_STEPS:-10}"
 TEMPERATURE="${TEMPERATURE:-1.0}"
 
 NUM_CELLS_VIZ="${NUM_CELLS_VIZ:-3}"
