@@ -1,0 +1,87 @@
+# Example Configuration for Cell-Type Specific Inference
+#
+# This config demonstrates how to generate perturbed cells for ONE CELL TYPE at a time.
+# The key parameter is `inference.cell_type` which specifies which cell type to generate.
+#
+# Usage:
+#   python celltype_cond/scripts/inference_celltype_perturbseq.py \
+#       --config celltype_cond/configs/celltype_inference_example.yaml \
+#       --experiment_dir experiments/celltype_model \
+#       --cell_type "T cell"
+#
+# Or override cell_type via command line:
+#   python inference_celltype_perturbseq.py --config ... --cell_type "B cell"
+
+# Data parameters
+data:
+  # Test data path (must contain cell_type column)
+  data_path: /path/to/test_data.h5ad
+
+  # Column names
+  gene: gene
+  cell_type_col: cell_type
+  control_name: non-targeting
+
+  # Optional: pre-computed embeddings
+  cond_labels_pt_path: null
+  celltype_labels_pt_path: null
+
+# Inference parameters - THE KEY CONFIGURATION
+inference:
+  # ==============================================
+  # CELL TYPE FILTERING (THE MAIN FEATURE)
+  # ==============================================
+  # Specify the cell type to generate predictions for.
+  # - Set to a specific cell type name: "T cell", "B cell", "Monocyte", etc.
+  # - Set to null to generate for ALL cell types in the model
+  #
+  # Examples:
+  #   cell_type: "T cell"      # Generate only for T cells
+  #   cell_type: "B cell"      # Generate only for B cells
+  #   cell_type: null          # Generate for all cell types
+  cell_type: "T cell"
+
+  # ==============================================
+  # PERTURBATION FILTERING
+  # ==============================================
+  # Specify which perturbations to generate
+  # - List specific perturbations, or
+  # - Provide a file with perturbation names, or
+  # - Set to null for all perturbations
+  perturbations: null
+  perturbations_file: null  # /path/to/perturbations.txt (one per line)
+
+  # ==============================================
+  # GENERATION PARAMETERS
+  # ==============================================
+  num_samples_per_condition: 100  # Samples per (perturbation, cell_type) pair
+  num_steps: 50  # Diffusion sampling steps
+  temperature: 1.0  # Sampling temperature (higher = more diverse)
+  batch_size: 32  # Batch size for generation
+
+  # Output settings
+  output_dir: null  # null = experiment_dir/inference_results/celltype_{cell_type}
+  save_h5ad: true  # Save generated cells as h5ad file
+
+# Other parameters
+other:
+  seed: 42
+
+# ==============================================
+# WORKFLOW EXAMPLE: Generate for Multiple Cell Types
+# ==============================================
+# To systematically generate predictions for multiple cell types,
+# run the inference script multiple times with different cell_type values:
+#
+# for cell_type in "T cell" "B cell" "Monocyte" "NK cell"; do
+#     python celltype_cond/scripts/inference_celltype_perturbseq.py \
+#         --config celltype_cond/configs/celltype_inference_example.yaml \
+#         --experiment_dir experiments/celltype_model \
+#         --cell_type "$cell_type"
+# done
+#
+# This will create separate output directories:
+#   experiments/celltype_model/inference_results/celltype_T_cell/
+#   experiments/celltype_model/inference_results/celltype_B_cell/
+#   experiments/celltype_model/inference_results/celltype_Monocyte/
+#   experiments/celltype_model/inference_results/celltype_NK_cell/
