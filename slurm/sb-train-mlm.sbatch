@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
-#SBATCH --mem-per-gpu=64G
+#SBATCH --mem-per-gpu=256G
 #SBATCH --time=1:00:00
 #SBATCH --qos=normal
 #SBATCH --output=slurm_out/sedd_train-%A.out

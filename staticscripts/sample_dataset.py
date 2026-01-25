@@ -52,7 +52,7 @@ def sample_cells_from_h5ad(input_path, output_path, n_cells=5000, random_seed=42
 
 if __name__ == "__main__":
     sample_cells_from_h5ad(
-    input_path="/path/to/input.h5ad",
-    output_path="/path/to/output.h5ad",
+    input_path="/home/b5cc/sanjukta.b5cc/st3/datasets/dentate/dentate.h5ad",
+    output_path="/home/b5cc/sanjukta.b5cc/st3/datasets/dentate/dentate_5000.h5ad",
     n_cells=5000,
     random_seed=42)

@@ -13,11 +13,13 @@ model:
 data:
   data_path: null  # Must be specified via CLI or environment variable
   val_fraction: 0.1
+  train_data:
+  test_data:
 
 # Training hyperparameters
 training:
-  batch_size: 2
-  num_epochs: 100
+  batch_size: 1
+  num_epochs: 20
   learning_rate: 1.0e-4
   weight_decay: 0.01
   mask_ratio: 0.15
@@ -29,22 +31,25 @@ training:
 # Checkpoint and logging
 checkpointing:
   checkpoint_dir: experiments/mlm/128,4,4
-  save_interval: 10
+  save_interval: 2
   resume: null  # Path to checkpoint to resume from
 
 logging:
-  log_interval: 50
+  log_interval: 2
   val_interval: 1
 
 # Inference parameters
+
 inference:
-  mask_ratio: 0.2
-  num_steps: 50
+  reference_data: /home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad
+  num_generate: 10
+  num_steps: 10
   temperature: 1.0
+  seed: 42
+  keep_sparse: false
   sampler: euler
-  batch_size: 32
-  num_batches: null  # null means all batches
-  num_cells_visualize: 3
+  batch_size: 1
+  mask_ratio: 0.2
 
 # Other parameters
 other:

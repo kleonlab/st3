@@ -9,7 +9,7 @@ python scripts/train_rnaseq.py \
     --data_path "$DATA_PATH" \
     --checkpoint_dir "experiments/mlm/128,4,4" \
     --num_epochs 5 \
-    --batch_size 16 \
+    --batch_size 4 \
     --hidden_dim 128 \
     --num_layers 4 \
     --num_heads 4 \
