@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
 #SBATCH --mem-per-gpu=128G
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --qos=normal
 #SBATCH --output=slurm_out/sedd_conditional_inference-%A.out
 #SBATCH --mail-type=END,FAIL

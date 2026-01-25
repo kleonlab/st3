@@ -45,10 +45,10 @@ logging:
 # Inference parameters
 inference:
   mask_ratio: 0.2
-  num_steps: 20
+  num_steps: 50
   temperature: 1.0
   sampler: euler
-  batch_size: 2048
+  batch_size: 4096
   num_batches: null  # null means all batches
   num_cells_visualize: 3
   perturbations_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names.txt
