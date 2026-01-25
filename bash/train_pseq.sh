@@ -6,7 +6,7 @@
 #
 
 # Default config file (can be overridden by command line or environment)
-CONFIG="${CONFIG:-configs/perturbseq_small}"
+CONFIG="${CONFIG:-configs/perturbseq_small_test.yaml}"
 TRAIN_DATA_PATH="${TRAIN_DATA_PATH:-}"
 COND_LABELS_PT_PATH="${COND_LABELS_PT_PATH:-}"
 

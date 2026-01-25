@@ -16,14 +16,14 @@ data:
   pert_col: perturbation  # Column in adata.obs with perturbation labels
   control_name: non-targeting # Name of control perturbation
   val_fraction: 0.1
-  loader_path: /home/b5cc/sanjukta.b5cc/st3/examples/cell_load_config.toml
+  loader_path: /home/b5cc/sanjukta.b5cc/st3/examples/cell_load.toml
   cond_labels_pt_path: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/protein_embeddings.pt
   data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_test_split.h5ad
 
 # Training hyperparameters
 training:
-  batch_size: 64
-  num_epochs: 50
+  batch_size: 1024
+  num_epochs: 10
   learning_rate: 1.0e-4
   weight_decay: 0.01
   mask_ratio: 0.15
@@ -34,8 +34,8 @@ training:
 
 # Checkpoint and logging
 checkpointing:
-  checkpoint_dir: /home/b5cc/sanjukta.b5cc/st3/experiments/30k2
-  save_interval: 10
+  checkpoint_dir: /home/b5cc/sanjukta.b5cc/st3/experiments/test
+  save_interval: 2
   resume: null  # Path to checkpoint to resume from
 
 logging:
@@ -53,7 +53,7 @@ inference:
   num_cells_visualize: 3
   perturbations_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names.txt
   perturbations_all_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names_all.txt
-  num_samples_per_pert: 100 # null means all batches
+  num_samples_per_pert: 1000 # null means all batches
   num_cells_visualize: 3
 
 

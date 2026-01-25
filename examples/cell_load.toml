@@ -1,0 +1,15 @@
+
+[preprocesing]
+k562_pre = "/home/b5cc/sanjukta.b5cc/st3/datasets/5k/k562_5k_train_split_processed.h5ad"
+
+# Dataset paths - maps dataset names to their DIRECTORIES
+# cell-load expects h5ad files named {cell_type}.h5ad inside each directory
+[datasets]
+#k562 = "/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad"
+k562 = "/home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_train_split_processed.h5ad"
+rpe1 = "/home/b5cc/sanjukta.b5cc/st3/datasets/rpe1_processed.h5ad"
+
+# Training datasets - maps dataset names to "train" to use entire dataset for training
+[training]
+k562 = "train"
+rpe1 = "train"
