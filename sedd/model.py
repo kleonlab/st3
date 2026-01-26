@@ -81,12 +81,12 @@ class MultiHeadAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = hidden_dim // num_heads
         self.use_rotary = use_rotary
+        self.dropout_p = dropout  # Store dropout rate for Flash Attention
 
         assert hidden_dim % num_heads == 0
 
         self.qkv = nn.Linear(hidden_dim, 3 * hidden_dim, bias=False)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
-        self.dropout = nn.Dropout(dropout)
 
         if use_rotary:
             self.rotary = RotaryEmbedding(self.head_dim)
@@ -118,20 +118,28 @@ class MultiHeadAttention(nn.Module):
             q = apply_rotary_emb(q, freqs)
             k = apply_rotary_emb(k, freqs)
 
-        # Scaled dot-product attention
-        scale = self.head_dim ** -0.5
-        attn = torch.matmul(q, k.transpose(-2, -1)) * scale
-
+        # ========== FLASH ATTENTION - NO OOM! ==========
+        # Convert mask format if needed
+        # Flash Attention expects: [batch, num_heads, seq_len, seq_len] or None
+        attn_mask = None
         if mask is not None:
             # mask: [batch, seq_len] -> [batch, 1, 1, seq_len]
-            mask = mask.unsqueeze(1).unsqueeze(2)
-            attn = attn.masked_fill(mask == 0, float("-inf"))
+            attn_mask = mask.unsqueeze(1).unsqueeze(2)
+            # Expand to [batch, 1, seq_len, seq_len] for compatibility
+            attn_mask = attn_mask.expand(batch_size, 1, seq_len, seq_len)
+            # Convert boolean mask to additive mask (0 for attend, -inf for mask)
+            attn_mask = torch.where(attn_mask == 0, float('-inf'), 0.0)
 
-        attn = F.softmax(attn, dim=-1)
-        attn = self.dropout(attn)
+        # Use PyTorch's memory-efficient Flash Attention
+        out = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=attn_mask,
+            dropout_p=self.dropout_p if self.training else 0.0,
+            is_causal=False
+        )
+        # ========== END FLASH ATTENTION ==========
 
-        # Apply attention to values
-        out = torch.matmul(attn, v)
+        # Reshape output
         out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.hidden_dim)
         out = self.out_proj(out)
 

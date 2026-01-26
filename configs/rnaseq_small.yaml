@@ -18,7 +18,7 @@ data:
 
 # Training hyperparameters
 training:
-  batch_size: 1
+  batch_size: 32
   num_epochs: 20
   learning_rate: 1.0e-4
   weight_decay: 0.01
