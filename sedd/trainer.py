@@ -136,13 +136,13 @@ class SEDDTrainer:
         else:
             # bf16 or fp32 - no gradient scaling needed
             loss.backward()
-            
+
             if self.gradient_clip > 0:
                 nn.utils.clip_grad_norm_(
                     self.model.parameters(),
                     self.gradient_clip
                 )
-            
+
             self.optimizer.step()
         
         self.step += 1
@@ -502,13 +502,13 @@ class PerturbationTrainer:
         else:
             # bf16 or fp32 - no gradient scaling needed
             loss.backward()
-            
+
             if self.gradient_clip > 0:
                 nn.utils.clip_grad_norm_(
                     self.model.parameters(),
                     self.gradient_clip
                 )
-            
+
             self.optimizer.step()
         
         self.step += 1

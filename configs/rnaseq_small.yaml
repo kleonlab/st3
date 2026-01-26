@@ -18,8 +18,8 @@ data:
 
 # Training hyperparameters
 training:
-  batch_size: 32
-  num_epochs: 20
+  batch_size: 32  # Max safe: 256, Recommended: 192 (for 97GB GPU with 28k context)
+  num_epochs: 50
   learning_rate: 1.0e-4
   weight_decay: 0.01
   mask_ratio: 0.15
@@ -27,10 +27,14 @@ training:
   optimizer:
     type: AdamW
     betas: [0.9, 0.999]
+  # Mixed precision training
+  use_amp: true  # Enable automatic mixed precision
+  amp_dtype: bfloat16  # Options: bfloat16, float16
+
 
 # Checkpoint and logging
 checkpointing:
-  checkpoint_dir: experiments/mlm/128,4,4
+  checkpoint_dir: experiments/mlm/128,4,4b
   save_interval: 2
   resume: null  # Path to checkpoint to resume from
 

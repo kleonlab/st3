@@ -485,7 +485,7 @@ def main():
     
     if args.use_amp:
         print(f"\nUsing automatic mixed precision training with dtype: {args.amp_dtype}")
-    
+
     # Create trainer
     trainer = PerturbationTrainer(
         model=model,
