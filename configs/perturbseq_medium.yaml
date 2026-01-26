@@ -22,7 +22,7 @@ data:
 # Training hyperparameters
 training:
   batch_size: 2048
-  num_epochs: 20
+  num_epochs: 50
   learning_rate: 1.0e-4
   weight_decay: 0.01
   mask_ratio: 0.15
