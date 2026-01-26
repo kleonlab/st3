@@ -273,13 +273,20 @@ def main():
     print(f"\nGenerating {args.num_generate} cells with {args.num_steps} steps, "
           f"temperature={args.temperature}")
 
+    # Enable BF16 for faster inference
+    use_amp = True
+    amp_dtype = torch.bfloat16
+    print(f"Using AMP for inference: {use_amp}, dtype: bfloat16\n")
+    
     sampler = EulerSampler(
         model=model,
         graph=graph,
         noise=noise,
         num_steps=args.num_steps,
         device=device,
-        temperature=args.temperature
+        temperature=args.temperature,
+        use_amp=use_amp,
+        amp_dtype=amp_dtype
     )
 
     # Generate cells from all-masked starting point

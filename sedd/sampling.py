@@ -91,16 +91,22 @@ class EulerSampler(Sampler):
         num_steps: int = 100,
         device: torch.device = None,
         temperature: float = 1.0,
+        use_amp: bool = False,
+        amp_dtype: torch.dtype = torch.bfloat16,
     ):
         super().__init__(model, graph, noise, num_steps, device)
         self.temperature = temperature
+        self.use_amp = use_amp
+        self.amp_dtype = amp_dtype
 
     def step(self, x: Tensor, t: float, dt: float) -> Tensor:
         t_tensor = torch.tensor([t], device=self.device)
         sigma = self.noise.total(t_tensor)
         dsigma = self.noise.rate(t_tensor) * (-dt)  # dt is negative
 
-        score = self.model.score(x, sigma)  # [batch, seq, vocab]
+        # Use autocast for faster inference
+        with torch.cuda.amp.autocast(enabled=self.use_amp, dtype=self.amp_dtype):
+            score = self.model.score(x, sigma)  # [batch, seq, vocab]
 
         if isinstance(self.graph, AbsorbingGraph):
             return self._euler_step_absorbing(x, score, sigma, dsigma)
@@ -178,9 +184,13 @@ class PerturbationEulerSampler(Sampler):
         num_steps: int = 100,
         device: torch.device = None,
         temperature: float = 1.0,
+        use_amp: bool = False,
+        amp_dtype: torch.dtype = torch.bfloat16,
     ):
         super().__init__(model, graph, noise, num_steps, device)
         self.temperature = temperature
+        self.use_amp = use_amp
+        self.amp_dtype = amp_dtype
 
     @torch.no_grad()
     def sample(
@@ -236,8 +246,9 @@ class PerturbationEulerSampler(Sampler):
         sigma = self.noise.total(t_tensor)
         dsigma = self.noise.rate(t_tensor) * (-dt)
 
-        # Get score WITH perturbation conditioning
-        score = self.model.score(x, sigma, pert_labels)
+        # Get score WITH perturbation conditioning (use autocast for faster inference)
+        with torch.cuda.amp.autocast(enabled=self.use_amp, dtype=self.amp_dtype):
+            score = self.model.score(x, sigma, pert_labels)
 
         if isinstance(self.graph, AbsorbingGraph):
             return self._euler_step_absorbing(x, score, sigma, dsigma)
@@ -303,7 +314,10 @@ class PerturbationEulerSampler(Sampler):
     def denoise(self, x: Tensor, pert_labels: Tensor) -> Tensor:
         """Final denoising step with perturbation conditioning."""
         sigma = torch.tensor([0.01], device=self.device)
-        score = self.model.score(x, sigma, pert_labels)
+        
+        # Use autocast for faster inference
+        with torch.cuda.amp.autocast(enabled=self.use_amp, dtype=self.amp_dtype):
+            score = self.model.score(x, sigma, pert_labels)
 
         mask_idx = self.graph.mask_index if hasattr(self.graph, 'mask_index') else -1
         is_masked = (x == mask_idx)

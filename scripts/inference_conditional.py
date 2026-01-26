@@ -491,7 +491,21 @@ def main():
 
     model.eval()
 
-    sampler = PerturbationEulerSampler(model=model,graph=graph,noise=noise,num_steps=args.num_steps,temperature=args.temperature,device=device)
+    # Enable BF16 for faster inference
+    use_amp = True
+    amp_dtype = torch.bfloat16
+    print(f"Using AMP for inference: {use_amp}, dtype: bfloat16\n")
+    
+    sampler = PerturbationEulerSampler(
+        model=model,
+        graph=graph,
+        noise=noise,
+        num_steps=args.num_steps,
+        temperature=args.temperature,
+        device=device,
+        use_amp=use_amp,
+        amp_dtype=amp_dtype
+    )
 
     # Storage for generated cells
     all_generated = []

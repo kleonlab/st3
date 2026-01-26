@@ -353,13 +353,20 @@ def main():
     num_batches = args.num_batches or len(test_loader)
 
     # Create sampler with perturbation conditioning
+    # Enable BF16 for faster inference
+    use_amp = True
+    amp_dtype = torch.bfloat16
+    print(f"Using AMP for inference: {use_amp}, dtype: bfloat16\n")
+    
     sampler = PerturbationEulerSampler(
         model=model,
         graph=graph,
         noise=noise,
         num_steps=args.num_steps,
         temperature=args.temperature,
-        device=device
+        device=device,
+        use_amp=use_amp,
+        amp_dtype=amp_dtype
     )
 
     with torch.no_grad():
