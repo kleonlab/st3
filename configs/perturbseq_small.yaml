@@ -48,12 +48,12 @@ inference:
   num_steps: 50
   temperature: 1.0
   sampler: euler
-  batch_size: 4096
+  batch_size: 64
   num_batches: null  # null means all batches
   num_cells_visualize: 3
   perturbations_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names.txt
   perturbations_all_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names_all.txt
-  num_samples_per_pert: 100 # null means all batches
+  num_samples_per_pert: 1000 # null means all batches
   num_cells_visualize: 3
 
 

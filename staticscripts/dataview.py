@@ -1,7 +1,7 @@
 import scanpy as sc
 import os
 #adata = sc.read_h5ad("../datasets/competition_support_set/k562_gwps.h5")
-adata = sc.read_h5ad("/home/b5cc/sanjukta.b5cc/st3/experiments/30k/inference_results/generated_cells_5000.h5ad")
+adata = sc.read_h5ad("/home/b5cc/sanjukta.b5cc/st3/experiments/30k2/inference_results/generated_cells.h5ad")
 
 print(adata)
 print(len(adata))

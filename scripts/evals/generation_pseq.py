@@ -351,11 +351,11 @@ print("\n" + "=" * 50)
 print("Evaluating Generation Metrics")
 print("=" * 50)
 
-output_dir = Path("/home/b5cc/sanjukta.b5cc/st3/experiments/mlm_demo/rnaseq_small")
+output_dir = Path("/home/b5cc/sanjukta.b5cc/st3/experiments/30k2/evaluation")
 output_dir.mkdir(parents=True, exist_ok=True)
 
-test_data_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/dentate/dentate_5000.h5ad"
-predicted_data_path = "/home/b5cc/sanjukta.b5cc/st3/experiments/mlm_demo/rnaseq_small/generated_cells.h5ad"
+test_data_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_test_split.h5ad"
+predicted_data_path = "/home/b5cc/sanjukta.b5cc/st3/experiments/30k2/inference_results/generated_cells.h5ad"
 
 # Load test data
 adata_test = sc.read_h5ad(test_data_path)
