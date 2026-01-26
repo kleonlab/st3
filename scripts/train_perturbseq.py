@@ -263,6 +263,19 @@ def parse_args():
         default=training_config.get("gradient_clip", 1.0),
         help="Gradient clipping value"
     )
+    parser.add_argument(
+        "--use_amp",
+        action="store_true",
+        default=training_config.get("use_amp", False),
+        help="Use automatic mixed precision training"
+    )
+    parser.add_argument(
+        "--amp_dtype",
+        type=str,
+        default=training_config.get("amp_dtype", "bfloat16"),
+        choices=["bfloat16", "float16"],
+        help="AMP dtype (bfloat16 or float16)"
+    )
 
     parser.add_argument(
         "--checkpoint_dir",
@@ -379,8 +392,8 @@ def main():
     dm = PerturbationDataModule(
         toml_config_path=args.loader_path,
         embed_key= "X_hvg",
-        num_workers=0,
-        batch_size=1,
+        num_workers=args.num_workers,
+        batch_size=args.batch_size,
         pert_col="gene",
         control_pert="non-targeting",
         perturbations_to_use=train_genes,
@@ -463,6 +476,16 @@ def main():
         betas=(0.9, 0.999)
     )
 
+    # Convert amp_dtype string to torch dtype
+    amp_dtype_map = {
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+    }
+    amp_dtype = amp_dtype_map.get(args.amp_dtype, torch.bfloat16)
+    
+    if args.use_amp:
+        print(f"\nUsing automatic mixed precision training with dtype: {args.amp_dtype}")
+    
     # Create trainer
     trainer = PerturbationTrainer(
         model=model,
@@ -471,7 +494,9 @@ def main():
         optimizer=optimizer,
         device=device,
         gradient_clip=args.gradient_clip,
-        cond_label_lookup=cond_label_lookup
+        cond_label_lookup=cond_label_lookup,
+        use_amp=args.use_amp,
+        amp_dtype=amp_dtype
     )
 
     # Resume from checkpoint if specified

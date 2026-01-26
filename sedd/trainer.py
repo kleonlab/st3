@@ -23,11 +23,15 @@ class SEDDTrainer:
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         device: torch.device = None,
         gradient_clip: float = 1.0,
+        use_amp: bool = False,
+        amp_dtype: torch.dtype = torch.bfloat16,
     ):
         self.model = model
         self.graph = graph
         self.noise = noise
         self.gradient_clip = gradient_clip
+        self.use_amp = use_amp
+        self.amp_dtype = amp_dtype
 
         self.device = device or torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
@@ -41,6 +45,12 @@ class SEDDTrainer:
             betas=(0.9, 0.999),
         )
         self.scheduler = scheduler
+        
+        # GradScaler is only needed for fp16, not bf16
+        self.scaler = None
+        if self.use_amp and self.amp_dtype == torch.float16:
+            self.scaler = torch.cuda.amp.GradScaler()
+        
         self.step = 0
         self.epoch = 0
         self.best_loss = float("inf")
@@ -63,18 +73,20 @@ class SEDDTrainer:
         else:
             x_noised = self.graph.sample_transition(x_clean, sigma)
 
-        pred_score = self.model.score(x_noised, sigma)
+        # Wrap forward pass in autocast for mixed precision
+        with torch.cuda.amp.autocast(enabled=self.use_amp, dtype=self.amp_dtype):
+            pred_score = self.model.score(x_noised, sigma)
 
-        mask_idx = getattr(self.graph, 'mask_index', self.graph.num_states - 1)
-        is_masked = (x_noised == mask_idx)
+            mask_idx = getattr(self.graph, 'mask_index', self.graph.num_states - 1)
+            is_masked = (x_noised == mask_idx)
 
-        if not is_masked.any():
-            return torch.tensor(0.0, device=device, requires_grad=True)
+            if not is_masked.any():
+                return torch.tensor(0.0, device=device, requires_grad=True)
 
-        pred_at_mask = pred_score[is_masked]
-        target_at_mask = x_clean[is_masked]
+            pred_at_mask = pred_score[is_masked]
+            target_at_mask = x_clean[is_masked]
 
-        loss = F.cross_entropy(pred_at_mask, target_at_mask)
+            loss = F.cross_entropy(pred_at_mask, target_at_mask)
 
         return loss
 
@@ -107,15 +119,32 @@ class SEDDTrainer:
         batch = batch.to(self.device)
         loss = self.compute_loss(batch, mask_ratio)
 
-        loss.backward()
-
-        if self.gradient_clip > 0:
-            nn.utils.clip_grad_norm_(
-                self.model.parameters(),
-                self.gradient_clip
-            )
-
-        self.optimizer.step()
+        # Backward pass with gradient scaling for mixed precision
+        if self.scaler is not None:
+            # fp16 with gradient scaling
+            self.scaler.scale(loss).backward()
+            
+            if self.gradient_clip > 0:
+                self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.gradient_clip
+                )
+            
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            # bf16 or fp32 - no gradient scaling needed
+            loss.backward()
+            
+            if self.gradient_clip > 0:
+                nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.gradient_clip
+                )
+            
+            self.optimizer.step()
+        
         self.step += 1
 
         return loss.item()
@@ -134,7 +163,10 @@ class SEDDTrainer:
             if isinstance(batch, (list, tuple)):
                 batch = batch[0]
             batch = batch.to(self.device)
-            loss = self.compute_loss(batch, mask_ratio)
+            
+            # Use autocast for validation too
+            with torch.cuda.amp.autocast(enabled=self.use_amp, dtype=self.amp_dtype):
+                loss = self.compute_loss(batch, mask_ratio)
             total_loss += loss.item()
             num_batches += 1
 
@@ -304,12 +336,16 @@ class PerturbationTrainer:
         device: torch.device = None,
         gradient_clip: float = 1.0,
         cond_label_lookup: Optional[Tensor] = None,
+        use_amp: bool = False,
+        amp_dtype: torch.dtype = torch.bfloat16,
     ):
         self.model = model
         self.graph = graph
         self.noise = noise
         self.gradient_clip = gradient_clip
         self.cond_label_lookup = cond_label_lookup
+        self.use_amp = use_amp
+        self.amp_dtype = amp_dtype
 
         self.device = device or torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
@@ -328,6 +364,12 @@ class PerturbationTrainer:
             betas=(0.9, 0.999),
         )
         self.scheduler = scheduler
+        
+        # GradScaler is only needed for fp16, not bf16
+        self.scaler = None
+        if self.use_amp and self.amp_dtype == torch.float16:
+            self.scaler = torch.cuda.amp.GradScaler()
+        
         self.step = 0
         self.epoch = 0
         self.best_loss = float("inf")
@@ -365,13 +407,15 @@ class PerturbationTrainer:
             x_noised = self.graph.sample_transition(perturbed, sigma)
 
         # Model predicts perturbed from noised + perturbation label
-        loss = self.model.get_loss(
-            x_perturbed=perturbed,
-            x_noised=x_noised,
-            sigma=sigma,
-            pert_labels=pert_labels,
-            graph=self.graph,
-        )
+        # Wrap forward pass in autocast for mixed precision
+        with torch.cuda.amp.autocast(enabled=self.use_amp, dtype=self.amp_dtype):
+            loss = self.model.get_loss(
+                x_perturbed=perturbed,
+                x_noised=x_noised,
+                sigma=sigma,
+                pert_labels=pert_labels,
+                graph=self.graph,
+            )
 
         return loss
 
@@ -441,16 +485,32 @@ class PerturbationTrainer:
         # Compute loss
         loss = self.compute_loss(pert_labels, perturbed, mask_ratio)
 
-        # Backward pass
-        loss.backward()
-
-        if self.gradient_clip > 0:
-            nn.utils.clip_grad_norm_(
-                self.model.parameters(),
-                self.gradient_clip
-            )
-
-        self.optimizer.step()
+        # Backward pass with gradient scaling for mixed precision
+        if self.scaler is not None:
+            # fp16 with gradient scaling
+            self.scaler.scale(loss).backward()
+            
+            if self.gradient_clip > 0:
+                self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.gradient_clip
+                )
+            
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            # bf16 or fp32 - no gradient scaling needed
+            loss.backward()
+            
+            if self.gradient_clip > 0:
+                nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.gradient_clip
+                )
+            
+            self.optimizer.step()
+        
         self.step += 1
 
         return loss.item()
@@ -552,7 +612,9 @@ class PerturbationTrainer:
             # Round and convert to long for discrete tokens
             perturbed = torch.round(perturbed).long()
 
-            loss = self.compute_loss(pert_labels, perturbed, mask_ratio)
+            # Use autocast for validation too
+            with torch.cuda.amp.autocast(enabled=self.use_amp, dtype=self.amp_dtype):
+                loss = self.compute_loss(pert_labels, perturbed, mask_ratio)
             total_loss += loss.item()
             num_batches += 1
 
