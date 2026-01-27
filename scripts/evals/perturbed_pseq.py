@@ -519,7 +519,7 @@ if __name__ == "__main__":
         real_pert_col="gene",
         gen_pert_col="perturbation",
         w2_projections=1000,
-        mmd_subsample=2000,
+        mmd_subsample=100,
         seed=42,
         verbose=True
     )
