@@ -1,7 +1,7 @@
 import scanpy as sc
 import os
 #adata = sc.read_h5ad("../datasets/competition_support_set/k562_gwps.h5")
-adata = sc.read_h5ad("/home/b5cc/sanjukta.b5cc/st3/experiments/30k/inference_results/generated_cells_5000.h5ad")
+adata = sc.read_h5ad("/home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_test_split.h5ad")
 
 print(adata)
 print(len(adata))
@@ -12,7 +12,10 @@ print(adata.X[2])
 
 print(adata.shape)
 
-#print(adata.obs['gene'].value_counts())
+print(adata.obs['gene'].value_counts())
+print(f"Number of unique values in 'gene' column: {adata.obs['gene'].nunique()}")
+
+
 #print(adata.obs['cell_type'].value_counts())
 # Save as a simple text file with two columns
 #counts = adata.obs['gene'].value_counts()

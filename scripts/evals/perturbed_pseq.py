@@ -1,8 +1,9 @@
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, List
 
 import numpy as np
+import pandas as pd
 import scanpy as sc
 from scipy.linalg import sqrtm
 from scipy.spatial.distance import cdist
@@ -161,10 +162,6 @@ def mmd2_rbf(
 
     return float(max(0, mmd2))  # MMD^2 should be non-negative
 
-import numpy as np
-import warnings
-from scipy.linalg import sqrtm
-from typing import Optional
 
 def frechet_distance(
     real: np.ndarray,
@@ -290,13 +287,14 @@ def frechet_distance(
     
     return fd
 
+
 def evaluate_generation(
     real: np.ndarray,
     generated: np.ndarray,
     w2_projections: int = 1000,
     mmd_subsample: Optional[int] = 2000,
     seed: Optional[int] = 42,
-    verbose: bool = True
+    verbose: bool = False
 ) -> dict:
     """
     Evaluate all generation metrics at once.
@@ -319,64 +317,259 @@ def evaluate_generation(
 
     # Calculate W2
     if verbose:
-        print("Calculating Wasserstein-2 Distance...")
+        print("  Calculating Wasserstein-2 Distance...")
     results['w2'] = wasserstein2_distance(
         real, generated, num_projections=w2_projections, seed=seed
     )
 
     # Calculate MMD2 RBF
     if verbose:
-        print("Calculating MMD2 RBF...")
+        print("  Calculating MMD2 RBF...")
     results['mmd2_rbf'] = mmd2_rbf(
         real, generated, subsample=mmd_subsample, seed=seed
     )
 
     # Calculate FD
     if verbose:
-        print("Calculating Fréchet Distance...")
+        print("  Calculating Fréchet Distance...")
     results['fd'] = frechet_distance(real, generated)
 
     if verbose:
-        print("\nGeneration Metrics:")
-        print(f"  W2 (Wasserstein-2):        {results['w2']:.6f} ↓")
-        print(f"  MMD2 RBF:                  {results['mmd2_rbf']:.6f} ↓")
-        print(f"  FD (Fréchet Distance):     {results['fd']:.6f} ↓")
-        print()
-        print("↓ = lower is better")
+        print(f"  W2:        {results['w2']:.6f}")
+        print(f"  MMD2 RBF:  {results['mmd2_rbf']:.6f}")
+        print(f"  FD:        {results['fd']:.6f}")
 
     return results
 
 
-print("\n" + "=" * 50)
-print("Evaluating Generation Metrics")
-print("=" * 50)
+def evaluate_per_perturbation(
+    real_adata: sc.AnnData,
+    generated_adata: sc.AnnData,
+    real_pert_col: str = "gene",
+    gen_pert_col: str = "perturbation",
+    w2_projections: int = 1000,
+    mmd_subsample: Optional[int] = 2000,
+    seed: Optional[int] = 42,
+    verbose: bool = True
+) -> Dict[str, dict]:
+    """
+    Evaluate generation metrics for each perturbation separately.
 
-output_dir = Path("/home/b5cc/sanjukta.b5cc/st3/experiments/mlm/128,4,4b")
-output_dir.mkdir(parents=True, exist_ok=True)
+    Args:
+        real_adata: AnnData with real cells
+        generated_adata: AnnData with generated cells
+        real_pert_col: Column name in real_adata.obs containing perturbation names
+        gen_pert_col: Column name in generated_adata.obs containing perturbation names
+        w2_projections: Number of projections for sliced Wasserstein distance
+        mmd_subsample: Maximum samples for MMD calculation (None for all)
+        seed: Random seed for reproducibility
+        verbose: If True, print progress
 
-test_data_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/dentate/dentate_5000.h5ad"
-predicted_data_path = "/home/b5cc/sanjukta.b5cc/st3/experiments/mlm/128,4,4b/inference/generated_cells.h5ad"
+    Returns:
+        Dictionary mapping perturbation names to their metrics
+    """
+    # Extract expression matrices
+    real_expr = real_adata.X
+    if hasattr(real_expr, "toarray"):
+        real_expr = real_expr.toarray()
+    
+    gen_expr = generated_adata.X
+    if hasattr(gen_expr, "toarray"):
+        gen_expr = gen_expr.toarray()
+    
+    # Get perturbations present in both datasets
+    real_perts = set(real_adata.obs[real_pert_col].unique())
+    gen_perts = set(generated_adata.obs[gen_pert_col].unique())
+    common_perts = sorted(real_perts & gen_perts)
+    
+    if verbose:
+        print(f"\nFound {len(common_perts)} common perturbations")
+        print(f"Real perturbations: {len(real_perts)}")
+        print(f"Generated perturbations: {len(gen_perts)}")
+        if len(real_perts - gen_perts) > 0:
+            print(f"Missing in generated: {real_perts - gen_perts}")
+        if len(gen_perts - real_perts) > 0:
+            print(f"Extra in generated: {gen_perts - real_perts}")
+        print()
+    
+    results = {}
+    
+    for pert in common_perts:
+        if verbose:
+            print(f"Processing: {pert}")
+        
+        # Filter data for this perturbation
+        real_mask = real_adata.obs[real_pert_col] == pert
+        gen_mask = generated_adata.obs[gen_pert_col] == pert
+        
+        real_pert_expr = real_expr[real_mask]
+        gen_pert_expr = gen_expr[gen_mask]
+        
+        if verbose:
+            print(f"  Real cells: {len(real_pert_expr)}, Generated cells: {len(gen_pert_expr)}")
+        
+        # Skip if too few samples
+        if len(real_pert_expr) < 2 or len(gen_pert_expr) < 2:
+            print(f"  Warning: Too few samples for {pert}, skipping")
+            continue
+        
+        # Evaluate metrics
+        pert_metrics = evaluate_generation(
+            real_pert_expr,
+            gen_pert_expr,
+            w2_projections=w2_projections,
+            mmd_subsample=mmd_subsample,
+            seed=seed,
+            verbose=verbose
+        )
+        
+        # Add sample counts
+        pert_metrics['n_real'] = int(len(real_pert_expr))
+        pert_metrics['n_generated'] = int(len(gen_pert_expr))
+        
+        results[pert] = pert_metrics
+        
+        if verbose:
+            print()
+    
+    return results
 
-# Load test data
-adata_test = sc.read_h5ad(test_data_path)
-test_expr = adata_test.X
-if hasattr(test_expr, "toarray"):
-    test_expr = test_expr.toarray()
 
-# Load predicted data
-adata_pred = sc.read_h5ad(predicted_data_path)
-pred_expr = adata_pred.X
-if hasattr(pred_expr, "toarray"):
-    pred_expr = pred_expr.toarray()
+def compute_aggregate_metrics(per_pert_results: Dict[str, dict]) -> dict:
+    """
+    Compute aggregate metrics across all perturbations.
 
-print(f"Test data: {len(test_expr)} cells")
-print(f"Predicted data: {len(pred_expr)} cells")
+    Args:
+        per_pert_results: Dictionary mapping perturbation names to their metrics
 
-print("\nComputing generation metrics...")
-metrics = evaluate_generation(test_expr, pred_expr, verbose=True)
+    Returns:
+        Dictionary with mean, median, std for each metric
+    """
+    if not per_pert_results:
+        return {}
+    
+    # Collect metrics
+    w2_values = [m['w2'] for m in per_pert_results.values()]
+    mmd2_values = [m['mmd2_rbf'] for m in per_pert_results.values()]
+    fd_values = [m['fd'] for m in per_pert_results.values()]
+    
+    aggregate = {
+        'w2': {
+            'mean': float(np.mean(w2_values)),
+            'median': float(np.median(w2_values)),
+            'std': float(np.std(w2_values)),
+            'min': float(np.min(w2_values)),
+            'max': float(np.max(w2_values)),
+        },
+        'mmd2_rbf': {
+            'mean': float(np.mean(mmd2_values)),
+            'median': float(np.median(mmd2_values)),
+            'std': float(np.std(mmd2_values)),
+            'min': float(np.min(mmd2_values)),
+            'max': float(np.max(mmd2_values)),
+        },
+        'fd': {
+            'mean': float(np.mean(fd_values)),
+            'median': float(np.median(fd_values)),
+            'std': float(np.std(fd_values)),
+            'min': float(np.min(fd_values)),
+            'max': float(np.max(fd_values)),
+        },
+        'num_perturbations': len(per_pert_results)
+    }
+    
+    return aggregate
 
-with open(output_dir / "generation_metrics.json", "w") as f:
-    json.dump(metrics, f, indent=2)
 
-print("\n" + "=" * 50)
-print(f"Results saved to {output_dir / 'generation_metrics.json'}")
+if __name__ == "__main__":
+    print("\n" + "=" * 60)
+    print("Evaluating Per-Perturbation Generation Metrics")
+    print("=" * 60)
+
+    output_dir = Path("/home/b5cc/sanjukta.b5cc/st3/experiments/30k3")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    test_data_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_test_split.h5ad"
+    predicted_data_path = "/home/b5cc/sanjukta.b5cc/st3/experiments/30k3/inference_results/generated_cells.h5ad"
+
+    print(f"\nLoading data...")
+    print(f"  Real: {test_data_path}")
+    print(f"  Generated: {predicted_data_path}")
+
+    # Load test data
+    adata_test = sc.read_h5ad(test_data_path)
+    print(f"\nReal data: {adata_test.n_obs} cells, {adata_test.n_vars} genes")
+    print(f"  Perturbation column: 'gene'")
+    print(f"  Unique perturbations: {len(adata_test.obs['gene'].unique())}")
+
+    # Load predicted data
+    adata_pred = sc.read_h5ad(predicted_data_path)
+    print(f"\nGenerated data: {adata_pred.n_obs} cells, {adata_pred.n_vars} genes")
+    print(f"  Perturbation column: 'perturbation'")
+    print(f"  Unique perturbations: {len(adata_pred.obs['perturbation'].unique())}")
+
+    # Compute per-perturbation metrics
+    print("\n" + "=" * 60)
+    print("Computing per-perturbation metrics...")
+    print("=" * 60)
+    
+    per_pert_metrics = evaluate_per_perturbation(
+        real_adata=adata_test,
+        generated_adata=adata_pred,
+        real_pert_col="gene",
+        gen_pert_col="perturbation",
+        w2_projections=1000,
+        mmd_subsample=2000,
+        seed=42,
+        verbose=True
+    )
+
+    # Compute aggregate statistics
+    print("\n" + "=" * 60)
+    print("Aggregate Statistics Across Perturbations")
+    print("=" * 60)
+    
+    aggregate_metrics = compute_aggregate_metrics(per_pert_metrics)
+    
+    print(f"\nNumber of perturbations evaluated: {aggregate_metrics['num_perturbations']}")
+    print("\nWasserstein-2 Distance:")
+    print(f"  Mean:   {aggregate_metrics['w2']['mean']:.6f}")
+    print(f"  Median: {aggregate_metrics['w2']['median']:.6f}")
+    print(f"  Std:    {aggregate_metrics['w2']['std']:.6f}")
+    print(f"  Range:  [{aggregate_metrics['w2']['min']:.6f}, {aggregate_metrics['w2']['max']:.6f}]")
+    
+    print("\nMMD2 RBF:")
+    print(f"  Mean:   {aggregate_metrics['mmd2_rbf']['mean']:.6f}")
+    print(f"  Median: {aggregate_metrics['mmd2_rbf']['median']:.6f}")
+    print(f"  Std:    {aggregate_metrics['mmd2_rbf']['std']:.6f}")
+    print(f"  Range:  [{aggregate_metrics['mmd2_rbf']['min']:.6f}, {aggregate_metrics['mmd2_rbf']['max']:.6f}]")
+    
+    print("\nFréchet Distance:")
+    print(f"  Mean:   {aggregate_metrics['fd']['mean']:.6f}")
+    print(f"  Median: {aggregate_metrics['fd']['median']:.6f}")
+    print(f"  Std:    {aggregate_metrics['fd']['std']:.6f}")
+    print(f"  Range:  [{aggregate_metrics['fd']['min']:.6f}, {aggregate_metrics['fd']['max']:.6f}]")
+
+    # Save results
+    output_file_detailed = output_dir / "generation_metrics_per_perturbation.json"
+    output_file_aggregate = output_dir / "generation_metrics_aggregate.json"
+    
+    with open(output_file_detailed, "w") as f:
+        json.dump(per_pert_metrics, f, indent=2)
+    
+    with open(output_file_aggregate, "w") as f:
+        json.dump(aggregate_metrics, f, indent=2)
+
+    # Create a summary CSV for easy viewing
+    df_results = pd.DataFrame.from_dict(per_pert_metrics, orient='index')
+    df_results.index.name = 'perturbation'
+    df_results = df_results.sort_values('w2')
+    df_results.to_csv(output_dir / "generation_metrics_per_perturbation.csv")
+
+    print("\n" + "=" * 60)
+    print("Results saved:")
+    print(f"  {output_file_detailed}")
+    print(f"  {output_file_aggregate}")
+    print(f"  {output_dir / 'generation_metrics_per_perturbation.csv'}")
+    print("=" * 60)
+

@@ -6,6 +6,7 @@ This script loads a trained model and generates new synthetic cells from scratch
 by starting from an all-masked state and sampling. Outputs a clean h5ad file.
 """
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ import sys
 import torch
 import numpy as np
 import scanpy as sc
+import yaml
 from scipy.sparse import csr_matrix
 
 # Add parent directory to path
@@ -24,6 +26,161 @@ from sedd.graph import AbsorbingGraph
 from sedd.noise import LogLinearNoise
 from sedd.trainer import SEDDTrainer
 from sedd.sampling import EulerSampler
+
+
+def load_config(config_path):
+    """Load YAML configuration file."""
+    if config_path is None or not Path(config_path).exists():
+        return {}
+    
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    return config if config else {}
+
+
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Generate synthetic cells using trained SEDD model",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    # Required arguments
+    parser.add_argument(
+        "--experiment_dir",
+        type=str,
+        required=True,
+        help="Path to experiment directory containing trained model"
+    )
+    
+    # Optional arguments
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML config file (optional)"
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Specific checkpoint path (if not provided, auto-finds best/final/latest)"
+    )
+    parser.add_argument(
+        "--reference_data",
+        type=str,
+        default=None,
+        help="Path to reference h5ad file for gene structure"
+    )
+    parser.add_argument(
+        "--output_path",
+        type=str,
+        default=None,
+        help="Output path for generated cells (default: experiment_dir/inference/generated_cells.h5ad)"
+    )
+    parser.add_argument(
+        "--num_generate",
+        type=int,
+        default=None,
+        help="Number of cells to generate"
+    )
+    parser.add_argument(
+        "--num_steps",
+        type=int,
+        default=None,
+        help="Number of sampling steps"
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Sampling temperature"
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed"
+    )
+    parser.add_argument(
+        "--keep_sparse",
+        action="store_true",
+        help="Save output as sparse matrix"
+    )
+    
+    return parser.parse_args()
+
+
+def merge_configs(args, config):
+    """
+    Merge command-line arguments with YAML config.
+    Priority: CLI args > YAML config > defaults
+    """
+    # Default values
+    defaults = {
+        'num_generate': 100,
+        'num_steps': 50,
+        'temperature': 1.0,
+        'seed': 42,
+        'keep_sparse': False,
+    }
+    
+    # Get inference section from config if it exists
+    inference_config = config.get('inference', {})
+    
+    # Merge with priority: args > config > defaults
+    merged = {}
+    
+    # Required argument
+    merged['experiment_dir'] = args.experiment_dir
+    
+    # Optional arguments with fallback chain
+    merged['checkpoint'] = args.checkpoint
+    merged['config'] = args.config
+    
+    merged['reference_data'] = (
+        args.reference_data 
+        or inference_config.get('reference_data')
+        or None
+    )
+    
+    merged['output_path'] = (
+        args.output_path
+        or inference_config.get('output_path')
+        or None
+    )
+    
+    merged['num_generate'] = (
+        args.num_generate
+        if args.num_generate is not None
+        else inference_config.get('num_generate', defaults['num_generate'])
+    )
+    
+    merged['num_steps'] = (
+        args.num_steps
+        if args.num_steps is not None
+        else inference_config.get('num_steps', defaults['num_steps'])
+    )
+    
+    merged['temperature'] = (
+        args.temperature
+        if args.temperature is not None
+        else inference_config.get('temperature', defaults['temperature'])
+    )
+    
+    merged['seed'] = (
+        args.seed
+        if args.seed is not None
+        else inference_config.get('seed', defaults['seed'])
+    )
+    
+    merged['keep_sparse'] = (
+        args.keep_sparse
+        or inference_config.get('keep_sparse', defaults['keep_sparse'])
+    )
+    
+    return merged
 
 
 def find_checkpoint(experiment_dir):
@@ -65,23 +222,52 @@ def find_checkpoint(experiment_dir):
 
 
 def main():
-    # ========== HARDCODED CONFIGURATION ==========
-    # Experiment settings
-    experiment_dir = "experiments/mlm_demo/rnaseq_small"
-    checkpoint = None  # None = auto-find best/final, or specify path like "experiments/.../best.pt"
+    # Parse command-line arguments
+    args = parse_args()
     
-    # Data settings
-    reference_data = "/home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad"
-    output_path = None  # None = save to experiment_dir/generated_cells.h5ad, or specify custom path
+    # Load YAML config if provided
+    config = {}
+    if args.config:
+        print(f"Loading configuration from {args.config}")
+        config = load_config(args.config)
     
-    # Generation settings
-    num_generate = 100  # Number of cells to generate
-    num_steps = 10      # Number of sampling steps
-    temperature = 1.0   # Sampling temperature
-    seed = 42           # Random seed
-    keep_sparse = False # Save as sparse matrix
-    # ========== END CONFIGURATION ==========
-
+    # Merge configurations (CLI args > config file > defaults)
+    params = merge_configs(args, config)
+    
+    # Extract parameters
+    experiment_dir = params['experiment_dir']
+    checkpoint = params['checkpoint']
+    reference_data = params['reference_data']
+    output_path = params['output_path']
+    num_generate = params['num_generate']
+    num_steps = params['num_steps']
+    temperature = params['temperature']
+    seed = params['seed']
+    keep_sparse = params['keep_sparse']
+    
+    # Validate required parameters
+    if reference_data is None:
+        raise ValueError(
+            "reference_data must be provided either via --reference_data argument "
+            "or in the config file under inference.reference_data"
+        )
+    
+    # Print configuration
+    print("="*60)
+    print("Generation Configuration")
+    print("="*60)
+    print(f"Experiment dir : {experiment_dir}")
+    print(f"Checkpoint     : {checkpoint if checkpoint else 'auto (best/final/latest)'}")
+    print(f"Reference data : {reference_data}")
+    print(f"Output path    : {output_path if output_path else 'auto (experiment_dir/inference/generated_cells.h5ad)'}")
+    print(f"Num generate   : {num_generate}")
+    print(f"Num steps      : {num_steps}")
+    print(f"Temperature    : {temperature}")
+    print(f"Seed           : {seed}")
+    print(f"Keep sparse    : {keep_sparse}")
+    print("="*60)
+    print()
+    
     # Set random seed
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -101,7 +287,7 @@ def main():
     if output_path:
         output_path = Path(output_path)
     else:
-        output_path = experiment_dir / "generated_cells.h5ad"
+        output_path = experiment_dir / "inference" / "generated_cells.h5ad"
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -45,9 +45,9 @@ logging:
 # Inference parameters
 
 inference:
-  reference_data: /home/b5cc/sanjukta.b5cc/aracneseq/datasets/k562_5k.h5ad
-  num_generate: 10
-  num_steps: 10
+  reference_data: /home/b5cc/sanjukta.b5cc/st3/datasets/dentate/dentate_5000.h5ad
+  num_generate: 100
+  num_steps: 50
   temperature: 1.0
   seed: 42
   keep_sparse: false
