@@ -90,17 +90,32 @@ def prepare_dataset(h5ad_path):
     adata.obsm["X_hvg"] = adata[:, adata.var.highly_variable].X.copy()
     print("x_hvg done")
 
-    adata.obs["cell_type"] = "single_cell_type"
+    import os
+    filename = os.path.basename(h5ad_path).replace('.h5ad', '')
+    if filename.endswith('_test'):
+        cell_type_name = filename[:-5]  # remove '_test'
+    elif filename.endswith('_train'):
+        cell_type_name = filename[:-6]  # remove '_train'
+    else:
+        cell_type_name = filename  # use as is if no _test/_train suffix
+    adata.obs["cell_type"] = cell_type_name
     adata.obs["cell_type"].value_counts()
 
-    adata.write("/home/b5cc/sanjukta.b5cc/st3/datasets/rpe1_processed.h5ad")
+    output_path = h5ad_path.replace('.h5ad', '_processed.h5ad')
+    adata.write(output_path)
 
 
     print("all done, ready for dataloader from cell-load")
 
 
 def main():
-    prepare_dataset("/home/b5cc/sanjukta.b5cc/st3/datasets/rpe1.h5ad")
+    prepare_dataset("/home/b5cc/sanjukta.b5cc/st3/datasets/20M/splits/hepg2_test.h5ad")
+    prepare_dataset("/home/b5cc/sanjukta.b5cc/st3/datasets/20M/splits/jurkat_test.h5ad")
+    prepare_dataset("/home/b5cc/sanjukta.b5cc/st3/datasets/20M/splits/rpe1_test.h5ad")
+    prepare_dataset("/home/b5cc/sanjukta.b5cc/st3/datasets/20M/splits/hepg2_train.h5ad")
+    prepare_dataset("/home/b5cc/sanjukta.b5cc/st3/datasets/20M/splits/jurkat_train.h5ad")
+    prepare_dataset("/home/b5cc/sanjukta.b5cc/st3/datasets/20M/splits/rpe1_train.h5ad")
+
 
 
 
