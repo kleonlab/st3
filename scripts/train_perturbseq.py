@@ -111,7 +111,21 @@ def load_conditional_labels(pt_path, pert_names):
         print(f"WARNING: Missing perturbations (first 10): {missing[:10]}")
 
     # Create lookup tensor: index -> conditional label
-    # Assumes pt_data values are either scalars or tensors
+    # First, determine the embedding dimension from available data
+    embedding_dim = None
+    for pert_name in pert_names:
+        if pert_name in pt_data:
+            label_val = pt_data[pert_name]
+            if isinstance(label_val, torch.Tensor):
+                if label_val.dim() > 0:  # Vector embedding
+                    embedding_dim = label_val.shape[0]
+                    break
+            else:
+                # Scalar labels
+                embedding_dim = None
+                break
+    
+    # Now create the lookup list with proper handling of missing values
     label_lookup = []
     for pert_name in pert_names:
         if pert_name in pt_data:
@@ -122,8 +136,14 @@ def load_conditional_labels(pt_path, pert_names):
             else:
                 label_lookup.append(torch.tensor(label_val))
         else:
-            # Use -1 for missing perturbations (will need to handle this)
-            label_lookup.append(torch.tensor(-1))
+            # Handle missing perturbations based on detected type
+            if embedding_dim is not None:
+                # Use zero vector for missing embeddings (same shape as others)
+                print(f"  Using zero embedding for missing perturbation: {pert_name}")
+                label_lookup.append(torch.zeros(embedding_dim))
+            else:
+                # Use -1 for missing scalar labels
+                label_lookup.append(torch.tensor(-1))
 
     # Stack into tensor
     if len(label_lookup) > 0:

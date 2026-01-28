@@ -12,18 +12,18 @@ model:
 
 # Data parameters
 data:
-  train_data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_train_split_processed.h5ad # Must be specified via CLI or environment variable
+  train_data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/20M/combined_train.h5ad # Must be specified via CLI or environment variable
   pert_col: perturbation  # Column in adata.obs with perturbation labels
   control_name: non-targeting # Name of control perturbation
   val_fraction: 0.1
-  loader_path: /home/b5cc/sanjukta.b5cc/st3/examples/cell_load_config.toml
-  cond_labels_pt_path: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/protein_embeddings.pt
-  data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_test_split.h5ad
+  loader_path: /home/b5cc/sanjukta.b5cc/st3/examples/cell_type_config.toml
+  cond_labels_pt_path: /home/b5cc/sanjukta.b5cc/st3/datasets/20M/protein_embeddings.pt
+  data_path: /home/b5cc/sanjukta.b5cc/st3/datasets/20M/hepg2_test_filtered.h5ad
 
 # Training hyperparameters
 training:
   batch_size: 128  # Max safe: 192, Conservative: 128 (for 97GB GPU with 8.5k context)
-  num_epochs: 50
+  num_epochs: 100
   learning_rate: 1.0e-4
   weight_decay: 0.01
   mask_ratio: 0.15
@@ -37,7 +37,7 @@ training:
 
 # Checkpoint and logging
 checkpointing:
-  checkpoint_dir: /home/b5cc/sanjukta.b5cc/st3/experiments/30k3
+  checkpoint_dir: /home/b5cc/sanjukta.b5cc/st3/experiments/20M2
   save_interval: 2
   resume: latest  # Path to checkpoint to resume from
 
@@ -54,11 +54,11 @@ inference:
   batch_size: 64
   num_batches: null  # null means all batches
   num_cells_visualize: 3
-  perturbations_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names_test.txt
-  perturbations_all_file: /home/b5cc/sanjukta.b5cc/st3/datasets/30k/perturbation_names_all.txt
+  perturbations_file: /home/b5cc/sanjukta.b5cc/st3/datasets/20M/test_perts.txt
+  perturbations_all_file: /home/b5cc/sanjukta.b5cc/st3/datasets/20M/filtered_perts.txt
   num_samples_per_pert: 100 # null means all batches
   num_cells_visualize: 3
-  cell_type: null  # e.g., 'hepg2', 'jurkat', 'rpe1' - must match training data
+  cell_type: "hepg2"  # e.g., 'hepg2', 'jurkat', 'rpe1' - must match training data
 
 
 

@@ -1,0 +1,9 @@
+[preprocessing]
+multi_cell_type = "/home/b5cc/sanjukta.b5cc/st3/datasets/20M/train.h5ad"
+
+[datasets]
+multi_cell = "/home/b5cc/sanjukta.b5cc/st3/datasets/20M/combined_train.h5ad"
+# k562_only = "/home/b5cc/sanjukta.b5cc/st3/datasets/30k/k562_train_split_processed.h5ad"
+
+[training]
+multi_cell = "train"

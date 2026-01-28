@@ -13,24 +13,24 @@
 # SLURM batch script for SEDD Conditional inference using trained checkpoint
 #
 # Usage:
-#   sbatch slurm/sb-inference-conditional.sbatch EXPERIMENT_DIR=experiments/your_exp [OPTIONS]
+#   sbatch slurm/inf_cond.sbatch
 #
 # Or with environment variables:
 #   CONFIG=configs/perturbseq_small.yaml \
-#   EXPERIMENT_DIR=experiments/5k_psed \
-#   PERTURBATIONS_FILE=perturbations.txt \
-#   MAPPING_DATA_PATH=/path/to/mapping.h5ad \
+#   EXPERIMENT_DIR=experiments/20M_demo \
+#   PERTURBATIONS_FILE=datasets/20M/test_perts.txt \
+#   PERTURBATIONS_ALL_FILE=datasets/20M/all_perts.txt \
+#   CELL_TYPE=hepg2 \
 #   NUM_SAMPLES_PER_PERT=100 \
-#   NUM_STEPS=50 \
+#   NUM_STEPS=100 \
 #   TEMPERATURE=1.0 \
-#   EVALUATE=true \
-#   sbatch slurm/sb-inference-conditional.sbatch
+#   sbatch slurm/inf_cond.sbatch
 #
 # perturbations.txt should contain one gene/perturbation name per line:
-#   KRAS
-#   TP53
-#   EGFR
-#   non-targeting
+#   ACTR5
+#   ATP5MF
+#   AURKAIP1
+#   etc.
 
 # Change to project directory
 cd /home/b5cc/sanjukta.b5cc/st3 || exit 1
@@ -91,8 +91,10 @@ fi
 CONFIG="${CONFIG:-/home/b5cc/sanjukta.b5cc/st3/configs/perturbseq_small.yaml}"
 EXPERIMENT_DIR="${EXPERIMENT_DIR}"  # No default - must be provided
 PERTURBATIONS_FILE="${PERTURBATIONS_FILE}"  # No default - use YAML config
+PERTURBATIONS_ALL_FILE="${PERTURBATIONS_ALL_FILE}"  # No default - use YAML config
 MAPPING_DATA_PATH="${MAPPING_DATA_PATH}"  # No default - use YAML config
 TEST_DATA_PATH="${TEST_DATA_PATH}"  # No default - use YAML config
+CELL_TYPE="${CELL_TYPE}"  # No default - use YAML config or omit
 NUM_SAMPLES_PER_PERT="${NUM_SAMPLES_PER_PERT}"  # No default - use YAML config
 NUM_STEPS="${NUM_STEPS}"  # No default - use YAML config
 TEMPERATURE="${TEMPERATURE}"  # No default - use YAML config
@@ -122,6 +124,11 @@ if [ -n "$TEST_DATA_PATH" ]; then
     echo "Test data path        : ${TEST_DATA_PATH}"
 else
     echo "Test data path        : (from config file if needed)"
+fi
+if [ -n "$CELL_TYPE" ]; then
+    echo "Cell type             : ${CELL_TYPE}"
+else
+    echo "Cell type             : (from config file or none)"
 fi
 echo "Samples per pert      : ${NUM_SAMPLES_PER_PERT}"
 echo "Num steps             : ${NUM_STEPS}"
@@ -155,6 +162,11 @@ if [ -n "$PERTURBATIONS_FILE" ]; then
     CMD="$CMD --perturbations_file $PERTURBATIONS_FILE"
 fi
 
+# Add perturbations all file if provided (overrides config)
+if [ -n "$PERTURBATIONS_ALL_FILE" ]; then
+    CMD="$CMD --perturbations_all_file $PERTURBATIONS_ALL_FILE"
+fi
+
 # Add mapping data path if provided (overrides config)
 if [ -n "$MAPPING_DATA_PATH" ]; then
     CMD="$CMD --mapping_data_path $MAPPING_DATA_PATH"
@@ -163,6 +175,11 @@ fi
 # Add test data path if provided (overrides config)
 if [ -n "$TEST_DATA_PATH" ]; then
     CMD="$CMD --test_data_path $TEST_DATA_PATH"
+fi
+
+# Add cell type if provided (overrides config)
+if [ -n "$CELL_TYPE" ]; then
+    CMD="$CMD --cell_type $CELL_TYPE"
 fi
 
 # Add generation parameters (only if explicitly provided, otherwise use config defaults)
