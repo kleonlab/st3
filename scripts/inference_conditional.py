@@ -236,6 +236,12 @@ def parse_args():
         default=data_config.get("control_name", "control"),
         help="Name of control perturbation"
     )
+    parser.add_argument(
+        "--cell_type",
+        type=str,
+        default=inference_config.get("cell_type", None),
+        help="Cell type to condition on (e.g., 'hepg2', 'jurkat', 'rpe1')"
+    )
     
     parser.add_argument(
         "--num_samples_per_pert",
@@ -375,6 +381,16 @@ def main():
     NUM_GENES = train_config.get('num_genes')
     NUM_BINS = train_config.get('num_bins') 
     NUM_PERTURBATIONS = train_config.get('num_perturbations')
+    
+    # Load cell type configuration if available
+    NUM_CELL_TYPES = train_config.get('num_cell_types', 0)
+    cell_type_to_idx = train_config.get('cell_type_to_idx', {})
+    
+    if NUM_CELL_TYPES > 0:
+        print(f"Model was trained with cell type conditioning: {NUM_CELL_TYPES} cell types")
+        print(f"Available cell types: {list(cell_type_to_idx.keys())}")
+    else:
+        print("Model was trained without cell type conditioning")
 
 
     # Prefer checkpoint shapes when available to avoid mismatch
@@ -454,6 +470,26 @@ def main():
         precomputed_emb_dim = cond_label_lookup.shape[1]
         print(f"Detected precomputed embedding dimension from labels: {precomputed_emb_dim}")
 
+    # Validate and process cell type argument
+    cell_type_idx = None
+    if args.cell_type:
+        if NUM_CELL_TYPES == 0:
+            print(f"\nWARNING: --cell_type '{args.cell_type}' specified but model was not trained with cell type conditioning")
+            print("Ignoring cell type argument")
+            args.cell_type = None
+        elif args.cell_type not in cell_type_to_idx:
+            raise ValueError(
+                f"Cell type '{args.cell_type}' not found in training data.\n"
+                f"Available cell types: {list(cell_type_to_idx.keys())}"
+            )
+        else:
+            cell_type_idx = cell_type_to_idx[args.cell_type]
+            print(f"\nGenerating with cell type conditioning: '{args.cell_type}' (index: {cell_type_idx})")
+    elif NUM_CELL_TYPES > 0:
+        print(f"\nWARNING: Model supports cell type conditioning but --cell_type not specified")
+        print(f"Available cell types: {list(cell_type_to_idx.keys())}")
+        print("Generating without cell type conditioning (may produce unexpected results)")
+
     # Create model
     print("\nCreating perturbation prediction model...")
     model = SEDDPerturbationTransformerSmall(
@@ -465,7 +501,8 @@ def main():
         num_heads=train_config.get("num_heads", 4),
         dropout=train_config.get("dropout", 0.1),
         max_seq_len=NUM_GENES,
-        precomputed_emb_dim = precomputed_emb_dim
+        precomputed_emb_dim=precomputed_emb_dim,
+        num_cell_types=NUM_CELL_TYPES if NUM_CELL_TYPES > 0 else None
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
@@ -523,7 +560,17 @@ def main():
                 # Apply conditional label lookup if available (converts index to precomputed embedding)
                 pert_label = trainer._apply_cond_label_lookup(pert_label)
 
-                generated = sampler.sample(x_init,pert_labels=pert_label,show_progress=False)
+                # Create cell type label tensor if specified
+                cell_type_label = None
+                if cell_type_idx is not None:
+                    cell_type_label = torch.tensor([cell_type_idx], dtype=torch.long, device=device)
+
+                generated = sampler.sample(
+                    x_init,
+                    pert_labels=pert_label,
+                    cell_type_labels=cell_type_label,
+                    show_progress=False
+                )
                 
                 all_generated.append(generated.cpu())
                 all_pert_indices.append(pert_idx)
@@ -532,17 +579,35 @@ def main():
     all_generated = torch.cat(all_generated, dim=0)  # [num_total_samples, num_genes]
     print(f"\nGenerated {len(all_generated)} cells total")
 
-    metadata = {"num_cells": len(all_generated),"num_perturbations": len(perturbations),"num_samples_per_pert": args.num_samples_per_pert,"num_steps": args.num_steps,"temperature": args.temperature,"perturbations": [p[0] for p in perturbations],"checkpoint": str(checkpoint_path),}
+    metadata = {
+        "num_cells": len(all_generated),
+        "num_perturbations": len(perturbations),
+        "num_samples_per_pert": args.num_samples_per_pert,
+        "num_steps": args.num_steps,
+        "temperature": args.temperature,
+        "perturbations": [p[0] for p in perturbations],
+        "checkpoint": str(checkpoint_path),
+        "cell_type": args.cell_type,
+        "cell_type_idx": cell_type_idx,
+    }
     with open(output_dir / "generation_metadata.json", 'w') as f:
         json.dump(metadata, f, indent=2)
     
+    # Create obs dictionary with cell type information
+    obs_dict = {
+        'perturbation': all_pert_names,
+        'perturbation_idx': all_pert_indices,
+        'sample_idx': [i % args.num_samples_per_pert for i in range(len(all_generated))]
+    }
+    
+    # Add cell type to obs if specified
+    if args.cell_type:
+        obs_dict['cell_type'] = [args.cell_type] * len(all_generated)
+        obs_dict['cell_type_idx'] = [cell_type_idx] * len(all_generated)
+    
     adata_generated = sc.AnnData(
         X=all_generated.numpy(),
-        obs={
-            'perturbation': all_pert_names,
-            'perturbation_idx': all_pert_indices,
-            'sample_idx': [i % args.num_samples_per_pert for i in range(len(all_generated))]
-        }
+        obs=obs_dict
     )
     adata_generated.write_h5ad(output_dir / "generated_cells.h5ad")
 

@@ -31,6 +31,7 @@ EXPERIMENT_DIR="${EXPERIMENT_DIR}"  # No default - must be provided
 PERTURBATIONS_FILE="${PERTURBATIONS_FILE}"  # No default - use YAML config
 MAPPING_DATA_PATH="${MAPPING_DATA_PATH}"  # No default - use YAML config
 TEST_DATA_PATH="${TEST_DATA_PATH}"  # No default - use YAML config
+CELL_TYPE="${CELL_TYPE}"  # No default - use YAML config or omit
 NUM_SAMPLES_PER_PERT="${NUM_SAMPLES_PER_PERT}"  # No default - use YAML config
 NUM_STEPS="${NUM_STEPS}"  # No default - use YAML config
 TEMPERATURE="${TEMPERATURE}"  # No default - use YAML config
@@ -60,6 +61,11 @@ if [ -n "$TEST_DATA_PATH" ]; then
 else
     echo "Test data path        : (from config file if needed)"
 fi
+if [ -n "$CELL_TYPE" ]; then
+    echo "Cell type             : ${CELL_TYPE}"
+else
+    echo "Cell type             : (from config file or none)"
+fi
 echo "Samples per pert      : ${NUM_SAMPLES_PER_PERT}"
 echo "Num steps             : ${NUM_STEPS}"
 echo "Temperature           : ${TEMPERATURE}"
@@ -88,6 +94,11 @@ fi
 # Add test data path if provided (overrides config)
 if [ -n "$TEST_DATA_PATH" ]; then
     CMD="$CMD --test_data_path $TEST_DATA_PATH"
+fi
+
+# Add cell type if provided (overrides config)
+if [ -n "$CELL_TYPE" ]; then
+    CMD="$CMD --cell_type $CELL_TYPE"
 fi
 
 # Add generation parameters (only if explicitly provided, otherwise use config defaults)

@@ -199,6 +199,7 @@ class PerturbationEulerSampler(Sampler):
         pert_labels: Tensor,
         mask_positions: Optional[Tensor] = None,
         show_progress: bool = True,
+        cell_type_labels: Optional[Tensor] = None,
     ) -> Tensor:
         """
         Sample perturbed cells conditioned on perturbation labels.
@@ -208,6 +209,7 @@ class PerturbationEulerSampler(Sampler):
             pert_labels: Perturbation labels [batch]
             mask_positions: Optional positions to keep fixed
             show_progress: Show progress bar
+            cell_type_labels: Optional cell type labels [batch]
 
         Returns:
             Sampled sequences [batch, seq_len]
@@ -215,6 +217,8 @@ class PerturbationEulerSampler(Sampler):
         self.model.eval()
         x = x_init.clone().to(self.device)
         pert_labels = pert_labels.to(self.device)
+        if cell_type_labels is not None:
+            cell_type_labels = cell_type_labels.to(self.device)
 
         times = torch.linspace(1, 0, self.num_steps + 1, device=self.device)
         dt = -1.0 / self.num_steps
@@ -225,12 +229,12 @@ class PerturbationEulerSampler(Sampler):
 
         for i in iterator:
             t = times[i]
-            x = self.step(x, t, dt, pert_labels)
+            x = self.step(x, t, dt, pert_labels, cell_type_labels)
 
             if mask_positions is not None:
                 x = torch.where(mask_positions, x, x_init)
 
-        x = self.denoise(x, pert_labels)
+        x = self.denoise(x, pert_labels, cell_type_labels)
 
         return x
 
@@ -239,16 +243,17 @@ class PerturbationEulerSampler(Sampler):
         x: Tensor,
         t: float,
         dt: float,
-        pert_labels: Tensor
+        pert_labels: Tensor,
+        cell_type_labels: Optional[Tensor] = None,
     ) -> Tensor:
-        """Single denoising step with perturbation conditioning."""
+        """Single denoising step with perturbation and cell type conditioning."""
         t_tensor = torch.tensor([t], device=self.device)
         sigma = self.noise.total(t_tensor)
         dsigma = self.noise.rate(t_tensor) * (-dt)
 
-        # Get score WITH perturbation conditioning (use autocast for faster inference)
+        # Get score WITH perturbation and cell type conditioning (use autocast for faster inference)
         with torch.cuda.amp.autocast(enabled=self.use_amp, dtype=self.amp_dtype):
-            score = self.model.score(x, sigma, pert_labels)
+            score = self.model.score(x, sigma, pert_labels, cell_type_labels=cell_type_labels)
 
         if isinstance(self.graph, AbsorbingGraph):
             return self._euler_step_absorbing(x, score, sigma, dsigma)
@@ -311,13 +316,13 @@ class PerturbationEulerSampler(Sampler):
         return torch.where(stay_mask, x, new_tokens)
 
     @torch.no_grad()
-    def denoise(self, x: Tensor, pert_labels: Tensor) -> Tensor:
-        """Final denoising step with perturbation conditioning."""
+    def denoise(self, x: Tensor, pert_labels: Tensor, cell_type_labels: Optional[Tensor] = None) -> Tensor:
+        """Final denoising step with perturbation and cell type conditioning."""
         sigma = torch.tensor([0.01], device=self.device)
         
         # Use autocast for faster inference
         with torch.cuda.amp.autocast(enabled=self.use_amp, dtype=self.amp_dtype):
-            score = self.model.score(x, sigma, pert_labels)
+            score = self.model.score(x, sigma, pert_labels, cell_type_labels=cell_type_labels)
 
         mask_idx = self.graph.mask_index if hasattr(self.graph, 'mask_index') else -1
         is_masked = (x == mask_idx)

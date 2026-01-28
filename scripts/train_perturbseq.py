@@ -349,6 +349,17 @@ def main():
 
     print(f"Found {len(np.unique(pert_labels))} unique perturbations")
 
+    # Extract cell type information
+    if 'cell_type' in adata.obs.columns:
+        cell_types = adata.obs['cell_type'].unique()
+        NUM_CELL_TYPES = len(cell_types)
+        cell_type_to_idx = {ct: idx for idx, ct in enumerate(sorted(cell_types))}
+        print(f"Found {NUM_CELL_TYPES} unique cell types: {sorted(cell_types)}")
+    else:
+        print("WARNING: 'cell_type' column not found in adata.obs - cell type conditioning disabled")
+        NUM_CELL_TYPES = 0
+        cell_type_to_idx = {}
+
     expression = adata.X
     if hasattr(expression, 'toarray'):
         expression = expression.toarray()
@@ -372,6 +383,8 @@ def main():
             "num_bins": NUM_BINS,
             "num_perturbations": NUM_PERTURBATIONS,
             "vocab_size": VOCAB_SIZE,
+            "num_cell_types": NUM_CELL_TYPES,
+            "cell_type_to_idx": cell_type_to_idx,
         }
     )
     with open(checkpoint_dir / "args.json", "w") as f:
@@ -458,7 +471,8 @@ def main():
         num_heads=args.num_heads,
         dropout=args.dropout,
         max_seq_len=NUM_GENES,
-        precomputed_emb_dim=precomputed_emb_dim
+        precomputed_emb_dim=precomputed_emb_dim,
+        num_cell_types=NUM_CELL_TYPES if NUM_CELL_TYPES > 0 else None
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
@@ -486,6 +500,14 @@ def main():
     if args.use_amp:
         print(f"\nUsing automatic mixed precision training with dtype: {args.amp_dtype}")
 
+    # Create cell type lookup tensor
+    cell_type_lookup = None
+    if NUM_CELL_TYPES > 0 and 'cell_type' in adata.obs.columns:
+        # Create mapping from perturbation -> cell_type indices for each sample
+        # This will be used by the trainer to look up cell types
+        cell_type_lookup = cell_type_to_idx
+        print(f"Cell type conditioning enabled with {NUM_CELL_TYPES} cell types")
+    
     # Create trainer
     trainer = PerturbationTrainer(
         model=model,
@@ -495,6 +517,7 @@ def main():
         device=device,
         gradient_clip=args.gradient_clip,
         cond_label_lookup=cond_label_lookup,
+        cell_type_lookup=cell_type_lookup,
         use_amp=args.use_amp,
         amp_dtype=amp_dtype
     )

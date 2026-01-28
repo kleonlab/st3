@@ -336,6 +336,7 @@ class PerturbationTrainer:
         device: torch.device = None,
         gradient_clip: float = 1.0,
         cond_label_lookup: Optional[Tensor] = None,
+        cell_type_lookup: Optional[dict] = None,
         use_amp: bool = False,
         amp_dtype: torch.dtype = torch.bfloat16,
     ):
@@ -344,6 +345,7 @@ class PerturbationTrainer:
         self.noise = noise
         self.gradient_clip = gradient_clip
         self.cond_label_lookup = cond_label_lookup
+        self.cell_type_lookup = cell_type_lookup
         self.use_amp = use_amp
         self.amp_dtype = amp_dtype
 
@@ -356,6 +358,10 @@ class PerturbationTrainer:
         if self.cond_label_lookup is not None:
             self.cond_label_lookup = self.cond_label_lookup.to(self.device)
             print(f"Using conditional label lookup with shape: {self.cond_label_lookup.shape}")
+        
+        # Store cell type lookup (dictionary mapping cell_type names to indices)
+        if self.cell_type_lookup is not None:
+            print(f"Using cell type conditioning with {len(self.cell_type_lookup)} cell types")
 
         self.optimizer = optimizer or torch.optim.AdamW(
             model.parameters(),
@@ -380,6 +386,7 @@ class PerturbationTrainer:
         pert_labels: Tensor,
         perturbed: Tensor,
         mask_ratio: float = 0.15,
+        cell_type_labels: Optional[Tensor] = None,
     ) -> Tensor:
         """
         Compute perturbation prediction loss.
@@ -389,6 +396,7 @@ class PerturbationTrainer:
             pert_labels: Perturbation labels [batch]
             perturbed: True perturbed expression [batch, seq_len]
             mask_ratio: Masking ratio (used by absorbing graph)
+            cell_type_labels: Optional cell type labels [batch]
 
         Returns:
             Cross-entropy loss at masked positions
@@ -406,7 +414,7 @@ class PerturbationTrainer:
         else:
             x_noised = self.graph.sample_transition(perturbed, sigma)
 
-        # Model predicts perturbed from noised + perturbation label
+        # Model predicts perturbed from noised + perturbation label + cell type
         # Wrap forward pass in autocast for mixed precision
         with torch.cuda.amp.autocast(enabled=self.use_amp, dtype=self.amp_dtype):
             loss = self.model.get_loss(
@@ -415,6 +423,7 @@ class PerturbationTrainer:
                 sigma=sigma,
                 pert_labels=pert_labels,
                 graph=self.graph,
+                cell_type_labels=cell_type_labels,
             )
 
         return loss
@@ -453,10 +462,24 @@ class PerturbationTrainer:
         self.optimizer.zero_grad()
 
         # Unpack batch - handle cell-load dictionary format
+        cell_type_labels = None
         if isinstance(batch, dict):
             # Cell-load batch format
             perturbed = batch['pert_cell_emb'].to(self.device)
             pert_emb = batch['pert_emb'].to(self.device)
+
+            # Extract cell type labels if available
+            if 'cell_type' in batch and self.cell_type_lookup is not None:
+                cell_type_names = batch['cell_type']
+                # Convert cell type names to indices
+                cell_type_indices = []
+                for ct_name in cell_type_names:
+                    if ct_name in self.cell_type_lookup:
+                        cell_type_indices.append(self.cell_type_lookup[ct_name])
+                    else:
+                        # Default to first cell type if not found
+                        cell_type_indices.append(0)
+                cell_type_labels = torch.tensor(cell_type_indices, device=self.device, dtype=torch.long)
 
             # Convert one-hot perturbation embeddings to indices
             # If pert_emb is one-hot, use argmax to get indices
@@ -482,8 +505,8 @@ class PerturbationTrainer:
         # Round and convert to long for discrete tokens
         perturbed = torch.round(perturbed).long()
 
-        # Compute loss
-        loss = self.compute_loss(pert_labels, perturbed, mask_ratio)
+        # Compute loss with cell type conditioning
+        loss = self.compute_loss(pert_labels, perturbed, mask_ratio, cell_type_labels)
 
         # Backward pass with gradient scaling for mixed precision
         if self.scaler is not None:
@@ -584,10 +607,24 @@ class PerturbationTrainer:
 
         for batch in val_loader:
             # Unpack batch - handle cell-load dictionary format
+            cell_type_labels = None
             if isinstance(batch, dict):
                 # Cell-load batch format
                 perturbed = batch['pert_cell_emb'].to(self.device)
                 pert_emb = batch['pert_emb'].to(self.device)
+
+                # Extract cell type labels if available
+                if 'cell_type' in batch and self.cell_type_lookup is not None:
+                    cell_type_names = batch['cell_type']
+                    # Convert cell type names to indices
+                    cell_type_indices = []
+                    for ct_name in cell_type_names:
+                        if ct_name in self.cell_type_lookup:
+                            cell_type_indices.append(self.cell_type_lookup[ct_name])
+                        else:
+                            # Default to first cell type if not found
+                            cell_type_indices.append(0)
+                    cell_type_labels = torch.tensor(cell_type_indices, device=self.device, dtype=torch.long)
 
                 # Convert one-hot perturbation embeddings to indices
                 if pert_emb.dim() == 2 and pert_emb.shape[1] > 1:
@@ -614,7 +651,7 @@ class PerturbationTrainer:
 
             # Use autocast for validation too
             with torch.cuda.amp.autocast(enabled=self.use_amp, dtype=self.amp_dtype):
-                loss = self.compute_loss(pert_labels, perturbed, mask_ratio)
+                loss = self.compute_loss(pert_labels, perturbed, mask_ratio, cell_type_labels)
             total_loss += loss.item()
             num_batches += 1
 

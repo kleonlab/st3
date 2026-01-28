@@ -411,6 +411,7 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         dropout: float = 0.1,
         max_seq_len: int = 4096,
         precomputed_emb_dim: int = None,
+        num_cell_types: int = None,
     ):
         """
         Args:
@@ -424,6 +425,7 @@ class SEDDPerturbationTransformer(SEDDTransformer):
             dropout: Dropout rate
             max_seq_len: Maximum sequence length
             precomputed_emb_dim: Dimension of pre-computed embeddings (e.g., 320 for ESM2), if using
+            num_cell_types: Number of unique cell types (optional, for dual conditioning)
         """
         super().__init__(
             num_genes=num_genes,
@@ -438,6 +440,7 @@ class SEDDPerturbationTransformer(SEDDTransformer):
 
         self.num_perturbations = num_perturbations
         self.precomputed_emb_dim = precomputed_emb_dim
+        self.num_cell_types = num_cell_types
 
         # Perturbation embedding
         self.pert_embed = nn.Embedding(num_perturbations, hidden_dim)
@@ -449,8 +452,20 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         else:
             self.precomputed_proj = None
 
+        # Cell type embedding (optional for dual conditioning)
+        if num_cell_types is not None and num_cell_types > 0:
+            self.cell_type_embed = nn.Embedding(num_cell_types, hidden_dim)
+            self.cell_type_proj = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim * 4),
+                nn.GELU(),
+                nn.Linear(hidden_dim * 4, hidden_dim),
+            )
+        else:
+            self.cell_type_embed = None
+            self.cell_type_proj = None
+
         # Update time embedding to also incorporate perturbation
-        # New conditioning will be: time_emb + pert_emb
+        # New conditioning will be: time_emb + pert_emb (+ cell_type_emb if available)
         self.pert_proj = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 4),
             nn.GELU(),
@@ -465,6 +480,7 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         sigma: Tensor,
         pert_labels: Tensor,
         mask: Optional[Tensor] = None,
+        cell_type_labels: Optional[Tensor] = None,
     ) -> Tensor:
         """
         Args:
@@ -472,6 +488,7 @@ class SEDDPerturbationTransformer(SEDDTransformer):
             sigma: Diffusion time [batch] or scalar
             pert_labels: Perturbation labels [batch]
             mask: Optional attention mask [batch, seq_len]
+            cell_type_labels: Optional cell type labels [batch]
 
         Returns:
             Logits [batch, seq_len, vocab_size]
@@ -506,8 +523,14 @@ class SEDDPerturbationTransformer(SEDDTransformer):
                 p_emb = pert_labels
         p_emb = self.pert_proj(p_emb)
 
-        # Combined conditioning: time + perturbation
+        # Combined conditioning: time + perturbation (+ cell_type if available)
         cond = t_emb + p_emb
+
+        # Add cell type conditioning if available
+        if cell_type_labels is not None and self.cell_type_embed is not None:
+            ct_emb = self.cell_type_embed(cell_type_labels.long())
+            ct_emb = self.cell_type_proj(ct_emb)
+            cond = cond + ct_emb
 
         # Transformer blocks
         for block in self.blocks:
@@ -525,9 +548,10 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         sigma: Tensor,
         pert_labels: Tensor,
         mask: Optional[Tensor] = None,
+        cell_type_labels: Optional[Tensor] = None,
     ) -> Tensor:
         """Compute log probabilities (scores) for each token."""
-        logits = self.forward(x, sigma, pert_labels, mask)
+        logits = self.forward(x, sigma, pert_labels, mask, cell_type_labels)
         score = F.log_softmax(logits, dim=-1)
         return score
 
@@ -539,6 +563,7 @@ class SEDDPerturbationTransformer(SEDDTransformer):
         pert_labels: Tensor,
         graph,
         mask: Optional[Tensor] = None,
+        cell_type_labels: Optional[Tensor] = None,
     ) -> Tensor:
         """
         Compute perturbation prediction loss.
@@ -551,12 +576,13 @@ class SEDDPerturbationTransformer(SEDDTransformer):
             pert_labels: Perturbation labels [batch]
             graph: Diffusion graph (for mask index)
             mask: Optional attention mask
+            cell_type_labels: Optional cell type labels [batch]
 
         Returns:
             Cross-entropy loss at masked positions
         """
-        # Predict perturbed expression from noised perturbed + perturbation label
-        pred_score = self.score(x_noised, sigma, pert_labels, mask)
+        # Predict perturbed expression from noised perturbed + perturbation label + cell type
+        pred_score = self.score(x_noised, sigma, pert_labels, mask, cell_type_labels)
 
         # Only compute loss at masked positions
         is_masked = (x_noised == self.mask_index)
