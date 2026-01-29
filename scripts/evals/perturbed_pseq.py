@@ -486,11 +486,11 @@ if __name__ == "__main__":
     print("Evaluating Per-Perturbation Generation Metrics")
     print("=" * 60)
 
-    output_dir = Path("/home/b5cc/sanjukta.b5cc/st3/experiments/20M_demo")
+    output_dir = Path("/home/b5cc/sanjukta.b5cc/st3/experiments/20M")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     test_data_path = "/home/b5cc/sanjukta.b5cc/st3/datasets/20M/hepg2_test_filtered.h5ad"
-    predicted_data_path = "/home/b5cc/sanjukta.b5cc/st3/experiments/20M_demo/inference_results/generated_cells.h5ad"
+    predicted_data_path = "/home/b5cc/sanjukta.b5cc/st3/experiments/20M/inference_results/generated_cells.h5ad"
 
     print(f"\nLoading data...")
     print(f"  Real: {test_data_path}")
