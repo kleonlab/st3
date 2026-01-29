@@ -5,7 +5,7 @@
 # Model architecture
 model:
   name: SEDDPerturbationTransformerSmall
-  hidden_dim: 256
+  hidden_dim: 128
   num_layers: 8
   num_heads: 8
   dropout: 0.1
@@ -37,7 +37,7 @@ training:
 
 # Checkpoint and logging
 checkpointing:
-  checkpoint_dir: /home/b5cc/sanjukta.b5cc/st3/experiments/20M
+  checkpoint_dir: /home/b5cc/sanjukta.b5cc/st3/experiments/10M
   save_interval: 2
   resume: latest  # Path to checkpoint to resume from
 
@@ -48,7 +48,7 @@ logging:
 # Inference parameters
 inference:
   mask_ratio: 0.2
-  num_steps: 200
+  num_steps: 100
   temperature: 1.0
   sampler: euler
   batch_size: 64
