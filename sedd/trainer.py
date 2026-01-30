@@ -188,13 +188,16 @@ class SEDDTrainer:
             checkpoint_dir = Path(checkpoint_dir)
             checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        for epoch in range(num_epochs):
+        # Start from current epoch if resuming from checkpoint
+        start_epoch = self.epoch
+        end_epoch = start_epoch + num_epochs
+        for epoch in range(start_epoch, end_epoch):
             self.epoch = epoch
 
             epoch_loss = 0.0
             num_batches = 0
 
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}")
+            pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{end_epoch}")
             for batch in pbar:
                 if isinstance(batch, (list, tuple)):
                     batch = batch[0]
@@ -673,13 +676,16 @@ class PerturbationTrainer:
         checkpoint_dir = Path(checkpoint_dir)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        for epoch in range(num_epochs):
+        # Start from current epoch if resuming from checkpoint
+        start_epoch = self.epoch
+        end_epoch = start_epoch + num_epochs
+        for epoch in range(start_epoch, end_epoch):
             self.epoch = epoch
 
             epoch_loss = 0.0
             num_batches = 0
 
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}")
+            pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{end_epoch}")
             for batch in pbar:
                 loss = self.train_step(batch, mask_ratio)
                 epoch_loss += loss
